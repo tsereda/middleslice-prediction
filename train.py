@@ -12,84 +12,77 @@ from monai.losses import DiceCELoss
 from transforms import get_train_transforms
 from PIL import Image, ImageDraw, ImageFont
 
-# --- NEW & IMPROVED HELPER: Creates a 1x4 comparison strip for a single modality ---
-def create_comparison_strip(
-    inputs_sample, gt_mask, pred_mask, slice_idx, batch_idx, modality_name, modality_indices
+# --- HELPER 1: Creates a simple 1x4 strip for a single modality ---
+def create_modality_strip_4_panel(
+    inputs_sample, gt_mask, slice_idx, batch_idx, modality_name, modality_indices
 ):
-    """
-    Creates a high-quality 1x4 composite image for a single modality:
-    [Prev Slice | GT Overlay | Prediction Overlay | Next Slice]
-    """
-    # Define standard BraTS colors for segmentation classes (Label 1, 2, 3)
-    # Using common colors: Red (Necrotic), Green (Edema), Yellow (Enhancing)
-    BRATS_COLORS = {
-        1: (255, 0, 0, 128),    # Red at 50% opacity
-        2: (0, 255, 0, 128),    # Green at 50% opacity
-        3: (255, 255, 0, 128),  # Yellow at 50% opacity
-    }
+    """Creates a 1x4 composite: [Prev Slice | Middle Slice | Next Slice | Ground Truth]"""
+    
+    # Extract slices and convert to 8-bit images
+    prev_slice = (inputs_sample[modality_indices["prev"]].numpy() * 255).astype(np.uint8)
+    middle_slice = (inputs_sample[modality_indices["middle"]].numpy() * 255).astype(np.uint8)
+    next_slice = (inputs_sample[modality_indices["next"]].numpy() * 255).astype(np.uint8)
+    gt_mask_img = (gt_mask * (255 / 3)).astype(np.uint8)
 
-    # --- 1. Extract and convert base anatomical slices ---
-    # Slices are normalized [0, 1], so scale to [0, 255] for uint8 images
-    prev_slice_np = (inputs_sample[modality_indices["prev"]].numpy() * 255).astype(np.uint8)
-    middle_slice_np = (inputs_sample[modality_indices["middle"]].numpy() * 255).astype(np.uint8)
-    next_slice_np = (inputs_sample[modality_indices["next"]].numpy() * 255).astype(np.uint8)
-
-    # Convert to PIL Images (RGB for color overlays)
-    prev_pil = Image.fromarray(prev_slice_np).convert("RGB")
-    middle_pil = Image.fromarray(middle_slice_np).convert("RGB")
-    next_pil = Image.fromarray(next_slice_np).convert("RGB")
-
-    # --- 2. Create colored overlay images for GT and Prediction ---
-    def create_overlay(base_img, mask_np):
-        # Create a transparent RGBA layer for the mask
-        overlay = Image.new("RGBA", base_img.size, (0, 0, 0, 0))
-        draw = ImageDraw.Draw(overlay)
-        
-        # Draw colored pixels for each class in the mask
-        for label, color in BRATS_COLORS.items():
-            points = np.argwhere(mask_np == label)
-            for p in points:
-                # PIL coordinates are (x, y) which is (col, row)
-                draw.point((p[1], p[0]), fill=color)
-
-        # Composite the base image and the colored mask overlay
-        return Image.alpha_composite(base_img.convert("RGBA"), overlay).convert("RGB")
-
-    gt_overlay_pil = create_overlay(middle_pil, gt_mask)
-    pred_overlay_pil = create_overlay(middle_pil, pred_mask)
-
-    # --- 3. Assemble the final 1x4 strip ---
-    img_size = prev_slice_np.shape[1]
+    img_size = prev_slice.shape[1]
     header_height = 40
     canvas = Image.new("RGB", (img_size * 4, img_size + header_height), (20, 20, 20))
 
-    # Paste the four images onto the canvas
-    canvas.paste(prev_pil, (0, header_height))
-    canvas.paste(gt_overlay_pil, (img_size, header_height))
-    canvas.paste(pred_overlay_pil, (img_size * 2, header_height))
-    canvas.paste(next_pil, (img_size * 3, header_height))
-
-    # --- 4. Add titles and labels ---
+    # Paste the four images side-by-side
+    canvas.paste(Image.fromarray(prev_slice), (0, header_height))
+    canvas.paste(Image.fromarray(middle_slice), (img_size, header_height))
+    canvas.paste(Image.fromarray(next_slice), (img_size * 2, header_height))
+    canvas.paste(Image.fromarray(gt_mask_img), (img_size * 3, header_height))
+    
+    # Add titles and labels
     draw = ImageDraw.Draw(canvas)
-    try:
-        font = ImageFont.truetype("arial.ttf", 15)
-    except IOError:
-        font = ImageFont.load_default()
-
-    title = f"{modality_name.upper()} Comparison - Batch #{batch_idx}, Middle Slice #{slice_idx}"
+    try: font = ImageFont.truetype("arial.ttf", 15)
+    except IOError: font = ImageFont.load_default()
+    title = f"{modality_name.upper()} Input Context - Batch #{batch_idx}, Slice #{slice_idx}"
     draw.text((10, 10), title, fill="white", font=font)
-
-    # Sub-labels for each panel
     draw.text((5, header_height + 5), f"Prev ({slice_idx-1})", fill="white", font=font)
-    draw.text((img_size + 5, header_height + 5), "Ground Truth", fill="white", font=font)
-    draw.text((img_size * 2 + 5, header_height + 5), "Prediction", fill="white", font=font)
-    draw.text((img_size * 3 + 5, header_height + 5), f"Next ({slice_idx+1})", fill="white", font=font)
+    draw.text((img_size + 5, header_height + 5), f"Middle ({slice_idx})", fill="white", font=font)
+    draw.text((img_size * 2 + 5, header_height + 5), f"Next ({slice_idx+1})", fill="white", font=font)
+    draw.text((img_size * 3 + 5, header_height + 5), "Ground Truth", fill="white", font=font)
+    return canvas
 
+# --- HELPER 2: Creates a simple 1x4 strip for the segmentation result ---
+def create_segmentation_strip_4_panel(
+    t1ce_slice, flair_slice, gt_mask, pred_mask, slice_idx, batch_idx
+):
+    """Creates a 1x4 composite: [Anatomy (T1ce) | Anatomy (FLAIR) | Ground Truth | Prediction]"""
+    
+    # Convert all inputs to 8-bit PIL Images
+    t1ce_img = Image.fromarray((t1ce_slice.numpy() * 255).astype(np.uint8))
+    flair_img = Image.fromarray((flair_slice.numpy() * 255).astype(np.uint8))
+    gt_mask_img = Image.fromarray((gt_mask * (255 / 3)).astype(np.uint8))
+    pred_mask_img = Image.fromarray((pred_mask * (255 / 3)).astype(np.uint8))
+
+    img_size = t1ce_img.width
+    header_height = 40
+    canvas = Image.new("RGB", (img_size * 4, img_size + header_height), (20, 20, 20))
+    
+    # Paste the four images side-by-side
+    canvas.paste(t1ce_img, (0, header_height))
+    canvas.paste(flair_img, (img_size, header_height))
+    canvas.paste(gt_mask_img, (img_size * 2, header_height))
+    canvas.paste(pred_mask_img, (img_size * 3, header_height))
+    
+    # Add titles and labels
+    draw = ImageDraw.Draw(canvas)
+    try: font = ImageFont.truetype("arial.ttf", 15)
+    except IOError: font = ImageFont.load_default()
+    title = f"Segmentation Output - Batch #{batch_idx}, Slice #{slice_idx}"
+    draw.text((10, 10), title, fill="white", font=font)
+    draw.text((5, header_height + 5), "Anatomy (T1ce)", fill="white", font=font)
+    draw.text((img_size + 5, header_height + 5), "Anatomy (FLAIR)", fill="white", font=font)
+    draw.text((img_size * 2 + 5, header_height + 5), "Ground Truth", fill="white", font=font)
+    draw.text((img_size * 3 + 5, header_height + 5), "Prediction", fill="white", font=font)
     return canvas
 
 
 class BraTS2D5Dataset(Dataset):
-    # ... (Dataset class is unchanged from the last optimized version) ...
+    # ... (Dataset class is unchanged) ...
     def __init__(self, data_dir, image_size, spacing, num_patients=None):
         self.image_size = image_size
         patient_dirs = sorted(glob.glob(os.path.join(data_dir, "BraTS*")))
@@ -133,13 +126,13 @@ class BraTS2D5Dataset(Dataset):
 
 
 def get_args():
+    # ... (get_args function is unchanged) ...
     parser = argparse.ArgumentParser(description="2.5D Swin UNETR training for BraTS.")
     parser.add_argument('--data_dir', type=str, required=True, help='Root directory for the BraTS dataset.')
     parser.add_argument('--output_dir', type=str, default='./checkpoints', help='Directory to save model checkpoints.')
     parser.add_argument('--epochs', type=int, default=25, help='Number of training epochs.')
     parser.add_argument('--batch_size', type=int, default=4, help='Training batch size.')
     parser.add_argument('--lr', type=float, default=1e-4, help='Learning rate.')
-    # --- Default resolution is 256 ---
     parser.add_argument('--img_size', type=int, default=256, help='Image size (height and width).')
     parser.add_argument('--num_patients',type=int,default=None,help='Number of patient volumes to use for quick testing (default: all).')
     return parser.parse_args()
@@ -177,11 +170,10 @@ def main(args):
             optimizer.step()
             epoch_loss += loss.item()
             
-            # --- MODIFIED: Simplified and improved logging ---
+            # --- MODIFIED: Logging 5 simple 4-panel strips ---
             if (i + 1) % 25 == 0:
                 print(f"   Epoch {epoch + 1}/{args.epochs}, Batch {i + 1}/{num_batches}...")
                 
-                # Get a single sample from the batch for visualization
                 inputs_sample = inputs[0].cpu()
                 gt_mask = labels[0, 0].cpu().numpy()
                 pred_mask = torch.argmax(outputs[0], dim=0).cpu().numpy()
@@ -195,13 +187,21 @@ def main(args):
                 }
                 log_payload = {"batch_loss": loss.item()}
 
-                # Generate and log one high-quality comparison strip for each modality
+                # 1. Log the 4 modality strips
                 for name, indices in modalities.items():
-                    comparison_img = create_comparison_strip(
-                        inputs_sample, gt_mask, pred_mask, slice_idx_sample, i + 1, name, indices
+                    modality_img = create_modality_strip_4_panel(
+                        inputs_sample, gt_mask, slice_idx_sample, i + 1, name, indices
                     )
-                    log_payload[f"samples/{name}_comparison"] = wandb.Image(comparison_img)
+                    log_payload[f"samples/{name}_strip"] = wandb.Image(modality_img)
                 
+                # 2. Log the 5th segmentation result strip
+                t1ce_slice = inputs_sample[modalities['t1ce']['middle']]
+                flair_slice = inputs_sample[modalities['flair']['middle']]
+                seg_img = create_segmentation_strip_4_panel(
+                    t1ce_slice, flair_slice, gt_mask, pred_mask, slice_idx_sample, i + 1
+                )
+                log_payload["samples/segmentation_strip"] = wandb.Image(seg_img)
+
                 wandb.log(log_payload)
         
         avg_loss = epoch_loss / num_batches
