@@ -8,6 +8,9 @@ import glob
 import argparse
 from time import time
 
+# --- NEW: Import torch.multiprocessing ---
+import torch.multiprocessing
+
 # --- W&B INTEGRATION: Import the library ---
 import wandb
 
@@ -19,6 +22,7 @@ from monai.losses import DiceCELoss
 from transforms import get_train_transforms
 
 class BraTS2D5Dataset(Dataset):
+    # ... (The rest of this class is unchanged) ...
     def __init__(self, data_dir, image_size, spacing, num_patients=None):
         self.image_size = image_size
         self.patient_dirs = sorted(glob.glob(os.path.join(data_dir, "BraTS*")))
@@ -86,6 +90,7 @@ class BraTS2D5Dataset(Dataset):
         return input_tensor, target_tensor
 
 def get_args():
+    # ... (This function is unchanged) ...
     parser = argparse.ArgumentParser(description="2.5D Swin UNETR training for BraTS.")
     parser.add_argument('--data_dir', type=str, required=True, help='Root directory for the BraTS dataset.')
     parser.add_argument('--output_dir', type=str, default='./checkpoints', help='Directory to save model checkpoints.')
@@ -102,9 +107,10 @@ def get_args():
     return parser.parse_args()
 
 def main(args):
+    # --- NEW: Set the multiprocessing sharing strategy to prevent deadlocks ---
+    torch.multiprocessing.set_sharing_strategy('file_system')
+
     # --- W&B INTEGRATION: Step 1 - Initialize the run ---
-    # W&B will automatically use the project and entity from your environment variables.
-    # We pass the `args` to `config` to save all hyperparameters.
     run_name = f"swin_unetr_2.5d_{int(time())}"
     wandb.init(config=args, name=run_name)
     
@@ -128,7 +134,6 @@ def main(args):
         spatial_dims=2,
     ).to(device)
 
-    # --- W&B INTEGRATION: Optional - Watch the model to log gradients and topology ---
     wandb.watch(model, log="all", log_freq=100)
 
     loss_function = DiceCELoss(to_onehot_y=True, softmax=True)
@@ -150,8 +155,6 @@ def main(args):
         avg_loss = epoch_loss / len(data_loader)
         print(f"--- Epoch {epoch + 1}/{args.epochs}, Average Loss: {avg_loss:.4f} ---")
         
-        # --- W&B INTEGRATION: Step 2 - Log metrics ---
-        # Log the average loss and current epoch to W&B
         wandb.log({"epoch": epoch + 1, "avg_loss": avg_loss})
         
         checkpoint_path = os.path.join(args.output_dir, f"swin_unetr_epoch_{epoch+1}.pth")
@@ -159,7 +162,6 @@ def main(args):
         print(f"Checkpoint saved to {checkpoint_path}")
 
     print("Training finished!")
-    # --- W&B INTEGRATION: Step 3 - Finish the run ---
     wandb.finish()
 
 
