@@ -1,16 +1,4 @@
-import torch
-from torch.utils.data import Dataset, DataLoader
-import numpy as np
-import os
-import glob
-import argparse
-from time import time
-import torch.multiprocessing
-import wandb
-from monai.networks.nets import SwinUNETR
-from torch.nn import L1Loss 
-from transforms import get_train_transforms
-import cv2
+# train.py
 
 import torch
 from torch.utils.data import Dataset, DataLoader
@@ -20,89 +8,12 @@ import glob
 import argparse
 from time import time
 import torch.multiprocessing
+import cv2
 import wandb
 from monai.networks.nets import SwinUNETR
 from torch.nn import L1Loss 
 from transforms import get_train_transforms
-import cv2
-
-def create_reconstruction_log_panel(
-    inputs_sample,      # Model input (Prev/Next slices), shape [8, H, W]
-    target_sample,      # Ground Truth (Real middle slice), shape [4, H, W]
-    output_sample,      # Model Prediction (Reconstructed middle slice), shape [4, H, W]
-    slice_idx,
-    batch_idx
-):
-    """
-    Creates a single, 4x5 composite grid for the reconstruction task,
-    using a 'HOT' colormap for the absolute difference for better error visualization.
-    """
-    
-    modalities = ["t1", "t1ce", "t2", "flair"]
-    all_rows = []
-    header_height = 30
-    
-    for i, name in enumerate(modalities):
-        prev_slice = (inputs_sample[i].cpu().numpy() * 255).astype(np.uint8)
-        next_slice = (inputs_sample[i + 4].cpu().numpy() * 255).astype(np.uint8)
-        
-        # Ground Truth and Model Prediction
-        gt_middle_float = target_sample[i].cpu().numpy()
-        pred_middle_float = output_sample[i].cpu().numpy()
-        
-        pred_middle_clipped_scaled = (np.clip(pred_middle_float, 0, 1) * 255).astype(np.uint8)
-        gt_middle_scaled = (gt_middle_float * 255).astype(np.uint8)
-
-        abs_diff_float = np.abs(pred_middle_float - gt_middle_float)
-        
-        # Scale difference based on a fixed range for consistency (e.g., 0.4 = max error)
-        max_diff_for_viz = 0.4 
-        scaled_diff = np.clip((abs_diff_float / max_diff_for_viz) * 255, 0, 255)
-        abs_diff_uint8 = scaled_diff.astype(np.uint8)
-        
-        # Apply the HOT colormap
-        abs_diff_bgr = cv2.applyColorMap(abs_diff_uint8, cv2.COLORMAP_HOT)
-        
-        # Convert all other grayscale images to BGR for consistent stacking
-        prev_bgr = cv2.cvtColor(prev_slice, cv2.COLOR_GRAY2BGR)
-        next_bgr = cv2.cvtColor(next_slice, cv2.COLOR_GRAY2BGR)
-        pred_bgr = cv2.cvtColor(pred_middle_clipped_scaled, cv2.COLOR_GRAY2BGR)
-        gt_bgr = cv2.cvtColor(gt_middle_scaled, cv2.COLOR_GRAY2BGR)
-        # abs_diff_bgr is already BGR from applyColorMap
-
-        # Combine into a 1x5 strip
-        row = np.hstack([prev_bgr, next_bgr, pred_bgr, gt_bgr, abs_diff_bgr])
-        
-        # Create a clean header with all text, no image overlays
-        header = np.full((header_height, row.shape[1], 3), 40, dtype=np.uint8)
-        
-        # 1. Draw the main modality name on the far left
-        cv2.putText(header, f"{name.upper()}", (10, 20), cv2.FONT_HERSHEY_SIMPLEX, 0.6, (255, 255, 255), 1)
-        
-        # 2. Define column titles and fonts
-        col_width = prev_bgr.shape[1]
-        font = cv2.FONT_HERSHEY_SIMPLEX
-        font_scale = 0.5
-        font_color = (200, 200, 200)
-        thickness = 1
-        column_titles = ["Input (Z-1)", "Input (Z+1)", "Prediction (Z)", "Ground Truth (Z)", "Abs Difference"]
-
-        # 3. Loop through and draw each column title centered in its column
-        for j, title in enumerate(column_titles):
-            (text_width, _), _ = cv2.getTextSize(title, font, font_scale, thickness)
-            # Calculate x-coordinate to center the text in the column
-            text_x = (col_width * j) + ((col_width - text_width) // 2)
-            cv2.putText(header, title, (text_x, 20), font, font_scale, font_color, thickness)
-
-        all_rows.append(np.vstack([header, row]))
-
-    # Combine all rows and add a main title
-    final_panel = np.vstack(all_rows)
-    main_header = np.full((40, final_panel.shape[1], 3), 60, dtype=np.uint8)
-    title = f"Slice Reconstruction - Batch #{batch_idx}, Middle Slice #{slice_idx}"
-    cv2.putText(main_header, title, (10, 28), cv2.FONT_HERSHEY_SIMPLEX, 0.7, (255, 255, 255), 1, cv2.LINE_AA)
-    
-    return np.vstack([main_header, final_panel])
+from logging_utils import create_reconstruction_log_panel
 
 
 class BraTS2D5Dataset(Dataset):
@@ -150,7 +61,6 @@ class BraTS2D5Dataset(Dataset):
 
         target_tensor = img_modalities[:, :, :, slice_idx]
 
-        # Return only the tensors needed for training and the slice index
         return input_tensor, target_tensor, slice_idx
 
 
@@ -190,7 +100,6 @@ def main(args):
         epoch_loss = 0
         num_batches = len(data_loader)
         
-        # Updated loop unpacking
         for i, (inputs, targets, slice_indices) in enumerate(data_loader):
             inputs, targets = inputs.to(device), targets.to(device)
             
@@ -204,7 +113,7 @@ def main(args):
             if (i + 1) % 100 == 0:
                 print(f"   Epoch {epoch + 1}/{args.epochs}, Batch {i + 1}/{num_batches} | L1 Loss: {loss.item():.4f}")
                 
-                # Updated function call (no seg_mask)
+                # The call to the function remains exactly the same
                 panel_bgr = create_reconstruction_log_panel(
                     inputs[0].detach(), 
                     targets[0].detach(), 

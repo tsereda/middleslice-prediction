@@ -12,11 +12,6 @@ from monai.transforms import (
 )
 
 def get_train_transforms(image_size, spacing):
-    """
-    Returns the MONAI transform pipeline for training.
-    This includes loading, standardizing orientation and spacing,
-    intensity normalization, cropping, and resizing.
-    """
     return Compose([
         LoadImaged(keys=["t1", "t1ce", "t2", "flair", "label"]),
         EnsureChannelFirstd(keys=["t1", "t1ce", "t2", "flair", "label"]),
