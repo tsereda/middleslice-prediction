@@ -61,7 +61,8 @@ spec:
             --data_dir training \
             --output_dir /data/checkpoints \
             --epochs 10 \
-            --batch_size 8
+            --batch_size 8 \
+            --num_patients 20
 
           echo "--- 6. Training complete. Pod will idle. ---"
           tail -f /dev/null

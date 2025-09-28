@@ -22,20 +22,19 @@ from monai.losses import DiceCELoss
 from transforms import get_train_transforms
 
 class BraTS2D5Dataset(Dataset):
-    # ... (The rest of this class is unchanged) ...
     def __init__(self, data_dir, image_size, spacing, num_patients=None):
         self.image_size = image_size
-        self.patient_dirs = sorted(glob.glob(os.path.join(data_dir, "BraTS*")))
+        patient_dirs = sorted(glob.glob(os.path.join(data_dir, "BraTS*")))
         
         if num_patients is not None:
             print(f"--- Using a subset of {num_patients} patients for testing. ---")
-            self.patient_dirs = self.patient_dirs[:num_patients]
+            patient_dirs = patient_dirs[:num_patients]
         
-        if not self.patient_dirs:
+        if not patient_dirs:
             raise FileNotFoundError(f"No patient data found in '{data_dir}'. Check your --data_dir path.")
         
         self.files = []
-        for patient_dir in self.patient_dirs:
+        for patient_dir in patient_dirs:
             self.files.append({
                 "t1": glob.glob(os.path.join(patient_dir, "*-t1n.nii.gz"))[0],
                 "t1ce": glob.glob(os.path.join(patient_dir, "*-t1c.nii.gz"))[0],
@@ -44,31 +43,37 @@ class BraTS2D5Dataset(Dataset):
                 "label": glob.glob(os.path.join(patient_dir, "*-seg.nii.gz"))[0],
             })
         
-        self.transforms = get_train_transforms(image_size, spacing)
+        transforms = get_train_transforms(image_size, spacing)
+
+        # --- OPTIMIZATION: Pre-load and process all volumes into memory ---
+        print("--- Pre-loading and processing volumes... ---")
+        start_time = time()
+        self.processed_volumes = []
+        for i, patient_files in enumerate(self.files):
+            self.processed_volumes.append(transforms(patient_files))
+            if (i + 1) % 10 == 0 or (i + 1) == len(self.files):
+                print(f"  Processed {i + 1}/{len(self.files)} patients...")
+        print(f"--- Volume processing took {time() - start_time:.2f} seconds. ---")
+
 
         self.slice_map = []
         print("Mapping slices to volumes...")
-        start_time = time()
-        for vol_idx, patient_files in enumerate(self.files):
-            sample_data = self.transforms(patient_files)
-            num_slices = sample_data["label"].shape[3]
+        for vol_idx, p_data in enumerate(self.processed_volumes):
+            num_slices = p_data["label"].shape[3]
             for slice_idx in range(num_slices):
                 self.slice_map.append((vol_idx, slice_idx))
-            
-            if (vol_idx + 1) % 10 == 0 or (vol_idx + 1) == len(self.files):
-                print(f"  Processed {vol_idx + 1}/{len(self.files)} patients...")
-
-        end_time = time()
+                
         print(f"Dataset ready. Found {len(self.slice_map)} total slices from {len(self.files)} volumes.")
-        print(f"Slice mapping took {end_time - start_time:.2f} seconds.")
 
 
     def __len__(self):
         return len(self.slice_map)
 
     def __getitem__(self, index):
+        # --- OPTIMIZATION: Directly access pre-processed data ---
         volume_idx, slice_idx = self.slice_map[index]
-        patient_data = self.transforms(self.files[volume_idx])
+        patient_data = self.processed_volumes[volume_idx]
+        
         img_modalities = torch.cat([patient_data['t1'], patient_data['t1ce'], patient_data['t2'], patient_data['flair']], dim=0)
         label_volume = patient_data['label']
 
@@ -125,11 +130,12 @@ def main(args):
         spacing=(1.0, 1.0, 1.0),
         num_patients=args.num_patients
     )
-    data_loader = DataLoader(dataset, batch_size=args.batch_size, shuffle=True, num_workers=0)
+    # --- NOTE: Using num_workers is now safe and efficient ---
+    data_loader = DataLoader(dataset, batch_size=args.batch_size, shuffle=True, num_workers=6)
 
     model = SwinUNETR(
         in_channels=12,
-        out_channels=4,
+        out_channels=4, 
         feature_size=24,
         spatial_dims=2,
     ).to(device)
@@ -143,13 +149,9 @@ def main(args):
     for epoch in range(args.epochs):
         model.train()
         epoch_loss = 0
-
         num_batches = len(data_loader)
         
         for i, (inputs, labels) in enumerate(data_loader):
-            if (i + 1) % 10 == 0:
-                print(f"  Epoch {epoch + 1}/{args.epochs}, Batch {i + 1}/{num_batches}...")
-
             inputs, labels = inputs.to(device), labels.to(device)
             optimizer.zero_grad()
             outputs = model(inputs)
@@ -157,11 +159,41 @@ def main(args):
             loss.backward()
             optimizer.step()
             epoch_loss += loss.item()
+            
+            # --- NEW: Log metrics and image sample every 10 batches ---
+            if (i + 1) % 10 == 0:
+                print(f"  Epoch {epoch + 1}/{args.epochs}, Batch {i + 1}/{num_batches}...")
+                
+                # Get the first image in the batch for visualization
+                # The 5th channel (index 4) is the T1c modality of the center slice
+                input_image = inputs[0, 4, :, :].cpu().numpy()
+                
+                # Prepare masks for wandb.Image
+                # Class labels for wandb are defined here
+                class_labels = {1: "necrotic core", 2: "edema", 3: "enhancing tumor"}
+                
+                # Get ground truth mask from the label tensor
+                gt_mask = labels[0, 0, :, :].cpu().numpy()
+                
+                # Get prediction mask by taking argmax of model output
+                pred_mask = torch.argmax(outputs, dim=1)[0].cpu().numpy()
+                
+                # Log to wandb
+                wandb.log({
+                    "batch_loss": loss.item(),
+                    "segmentation_sample": wandb.Image(
+                        input_image,
+                        masks={
+                            "ground_truth": {"mask_data": gt_mask, "class_labels": class_labels},
+                            "prediction": {"mask_data": pred_mask, "class_labels": class_labels},
+                        },
+                    ),
+                })
         
-        avg_loss = epoch_loss / num_batches # Use num_batches here
+        avg_loss = epoch_loss / num_batches
         print(f"--- Epoch {epoch + 1}/{args.epochs}, Average Loss: {avg_loss:.4f} ---")
         
-        
+        # Log epoch-level metrics
         wandb.log({"epoch": epoch + 1, "avg_loss": avg_loss})
         
         checkpoint_path = os.path.join(args.output_dir, f"swin_unetr_epoch_{epoch+1}.pth")
