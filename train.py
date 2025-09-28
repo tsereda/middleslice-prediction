@@ -109,8 +109,7 @@ def main(args):
     dataset = BraTS2D5Dataset(
         data_dir=args.data_dir,
         image_size=(args.img_size, args.img_size),
-        spacing=(1.0, 1.0, 1.0),
-        mode='training'
+        spacing=(1.0, 1.0, 1.0)
     )
     data_loader = DataLoader(dataset, batch_size=args.batch_size, shuffle=True, num_workers=4)
 

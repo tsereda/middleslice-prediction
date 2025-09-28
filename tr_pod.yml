@@ -51,13 +51,15 @@ spec:
           echo "--- 3. Preparing BraTS dataset ---"
           7z x /data/ASNR-MICCAI-BraTS2023-GLI-MET-TrainingData.tar.gz
           7z x ASNR-MICCAI-BraTS2023-GLI-MET-TrainingData.tar
+          mkdir training
+          mv ASNR-MICCAI-BraTS2023-GLI-MET-TrainingData/BraTS-* training
 
           echo "--- 4. Verifying environment ---"
           python -c "import torch; import wandb; print(f'PyTorch version: {torch.__version__}'); print(f'W&B version: {wandb.__version__}')"
           
           echo "--- 5. Running the training script ---"
           python /app/middleslice-prediction/train.py \
-            --data_dir . \
+            --data_dir training \
             --output_dir /data/checkpoints \
             --epochs 10 \
             --batch_size 8
