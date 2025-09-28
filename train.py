@@ -143,7 +143,7 @@ def get_args():
     parser.add_argument('--epochs', type=int, default=25, help='Number of training epochs.')
     parser.add_argument('--batch_size', type=int, default=4, help='Training batch size.')
     parser.add_argument('--lr', type=float, default=1e-4, help='Learning rate.')
-    parser.add_argument('--img_size', type=int, default=128, help='Image size (height and width).')
+    parser.add_argument('--img_size', type=int, default=256, help='Image size (height and width).')
     parser.add_argument('--num_patients',type=int,default=None,help='Number of patient volumes to use for quick testing (default: all).')
     return parser.parse_args()
 
@@ -186,7 +186,7 @@ def main(args):
             optimizer.step()
             epoch_loss += loss.item()
             
-            # --- MODIFIED: Logging logic updated to create composite images ---
+           # --- MODIFIED: Logging logic updated to create a single gallery element ---
             if (i + 1) % 25 == 0:
                 print(f"  Epoch {epoch + 1}/{args.epochs}, Batch {i + 1}/{num_batches}...")
                 
@@ -203,15 +203,24 @@ def main(args):
                     "flair": {"prev": 3, "middle": 7, "next": 11},
                 }
                 
-                log_payload = {"batch_loss": loss.item()}
+                # Create a list to hold our four composite wandb.Image objects
+                composite_gallery = []
 
                 for name, indices in modalities.items():
-                    composite_img = create_composite_image_for_modality(
+                    # Create the composite PIL image
+                    composite_pil_img = create_composite_image_for_modality(
                         inputs_sample, gt_mask, pred_mask, slice_idx_sample, i + 1, name, indices
                     )
-                    log_payload[f"samples/{name}_composite"] = wandb.Image(composite_img)
+                    # Append a wandb.Image object to our list, with a caption
+                    composite_gallery.append(
+                        wandb.Image(composite_pil_img, caption=f"Composite for {name.upper()} modality")
+                    )
                 
-                wandb.log(log_payload)
+                # Log the entire list under a single key
+                wandb.log({
+                    "batch_loss": loss.item(),
+                    "modality_composites": composite_gallery
+                })
         
         avg_loss = epoch_loss / num_batches
         print(f"--- Epoch {epoch + 1}/{args.epochs}, Average Loss: {avg_loss:.4f} ---")
