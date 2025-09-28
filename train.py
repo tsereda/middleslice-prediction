@@ -3,7 +3,7 @@ from torch.utils.data import Dataset, DataLoader
 import numpy as np
 import os
 import glob
-import argparse  # Import argparse
+import argparse
 
 # MONAI imports
 from monai.networks.nets import SwinUNETR
@@ -26,18 +26,17 @@ class BraTS2D5Dataset(Dataset):
         self.image_size = image_size
         self.patient_dirs = sorted(glob.glob(os.path.join(data_dir, "BraTS*")))
         if not self.patient_dirs:
-            raise FileNotFoundError(f"No patient data found in {os.path.join(data_dir)}. Check your --data_dir path.")
+            raise FileNotFoundError(f"No patient data found in '{data_dir}'. Check your --data_dir path.")
         
         self.files = []
         for patient_dir in self.patient_dirs:
             # Assumes standard BraTS file naming
-            # --- CORRECTED CODE ---
             self.files.append({
                 "t1": glob.glob(os.path.join(patient_dir, "*-t1n.nii.gz"))[0],
                 "t1ce": glob.glob(os.path.join(patient_dir, "*-t1c.nii.gz"))[0],
                 "t2": glob.glob(os.path.join(patient_dir, "*-t2w.nii.gz"))[0],
                 "flair": glob.glob(os.path.join(patient_dir, "*-t2f.nii.gz"))[0],
-                "label": glob.glob(os.path.join(patient_dir, "*-seg.nii.gz"))[0], # This will be the next error
+                "label": glob.glob(os.path.join(patient_dir, "*-seg.nii.gz"))[0],
             })
         
         # Preprocessing transforms for a single 3D volume
@@ -55,8 +54,12 @@ class BraTS2D5Dataset(Dataset):
         self.slice_map = []
         print("Mapping slices to volumes...")
         for vol_idx, patient_files in enumerate(self.files):
-            # To get the slice count, we must load and transform the data
-            sample_data = self.transforms({"label": patient_files["label"]})
+            # --- CORRECTED CODE ---
+            # To get the slice count, we must load and transform the full data dictionary
+            # because transforms like CropForegroundd depend on other keys (e.g., source_key="t1").
+            sample_data = self.transforms(patient_files)
+            # --- END CORRECTION ---
+            
             num_slices = sample_data["label"].shape[3]
             for slice_idx in range(num_slices):
                 self.slice_map.append((vol_idx, slice_idx))
