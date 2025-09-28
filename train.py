@@ -135,3 +135,64 @@ def main(args):
     device = torch.device("cuda" if torch.cuda.is_available() else "cpu")
     print(f"Using device: {device}")
     os.makedirs(args.output_dir, exist_ok=True)
+
+    dataset = BraTS2D5Dataset(data_dir=args.data_dir, image_size=(args.img_size, args.img_size), spacing=(1.0, 1.0, 1.0), num_patients=args.num_patients)
+    data_loader = DataLoader(dataset, batch_size=args.batch_size, shuffle=True, num_workers=8)
+
+    model = SwinUNETR(in_channels=8, out_channels=4, feature_size=24, spatial_dims=2).to(device)
+    wandb.watch(model, log="all", log_freq=100)
+    
+    loss_function = L1Loss()
+    optimizer = torch.optim.AdamW(model.parameters(), lr=args.lr)
+
+    print("Starting training for slice reconstruction...")
+    for epoch in range(args.epochs):
+        model.train()
+        epoch_loss = 0
+        num_batches = len(data_loader)
+        
+        # Updated loop unpacking
+        for i, (inputs, targets, slice_indices) in enumerate(data_loader):
+            inputs, targets = inputs.to(device), targets.to(device)
+            
+            optimizer.zero_grad()
+            outputs = model(inputs)
+            loss = loss_function(outputs, targets)
+            loss.backward()
+            optimizer.step()
+            epoch_loss += loss.item()
+            
+            if (i + 1) % 100 == 0:
+                print(f"   Epoch {epoch + 1}/{args.epochs}, Batch {i + 1}/{num_batches} | L1 Loss: {loss.item():.4f}")
+                
+                # Updated function call (no seg_mask)
+                panel_bgr = create_reconstruction_log_panel(
+                    inputs[0].detach(), 
+                    targets[0].detach(), 
+                    outputs[0].detach(), 
+                    slice_indices[0].item(), 
+                    i + 1
+                )
+                
+                panel_rgb = cv2.cvtColor(panel_bgr, cv2.COLOR_BGR2RGB)
+                
+                wandb.log({
+                    "batch_l1_loss": loss.item(),
+                    "reconstruction_samples": wandb.Image(panel_rgb)
+                })
+        
+        avg_loss = epoch_loss / num_batches
+        print(f"--- Epoch {epoch + 1}/{args.epochs}, Average L1 Loss: {avg_loss:.4f} ---")
+        wandb.log({"epoch": epoch + 1, "avg_epoch_l1_loss": avg_loss})
+        
+        checkpoint_path = os.path.join(args.output_dir, f"swin_unetr_recon_epoch_{epoch+1}.pth")
+        torch.save(model.state_dict(), checkpoint_path)
+        print(f"Checkpoint saved to {checkpoint_path}")
+
+    print("Training finished!")
+    wandb.finish()
+
+
+if __name__ == '__main__':
+    args = get_args()
+    main(args)
