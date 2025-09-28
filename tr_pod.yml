@@ -1,0 +1,108 @@
+apiVersion: v1
+kind: Pod
+metadata:
+  name: brats-swin-unetr-wandb
+spec:
+  nodeSelector:
+    nautilus.io/linstor: "true"
+  affinity:
+    nodeAffinity:
+      requiredDuringSchedulingIgnoredDuringExecution:
+        nodeSelectorTerms:
+        - matchExpressions:
+          - key: nvidia.com/gpu.product
+            operator: In
+            values:
+            - NVIDIA-A10
+            - NVIDIA-GeForce-RTX-3090
+            - NVIDIA-GeForce-RTX-4090
+            - NVIDIA-RTX-A6000
+            - Quadro-RTX-8000
+  tolerations:
+    - key: nvidia.com/gpu
+      operator: Exists
+  containers:
+    - name: swin-unetr-training
+      image: gitlab-registry.nrp-nautilus.io/prp/jupyter-stack/prp
+      env:
+        - name: WANDB_API_KEY
+          valueFrom:
+            secretKeyRef:
+              name: wandb-credentials
+              key: WANDB_API_KEY
+        - name: WANDB_PROJECT
+          value: "brats-swin-unetr-2.5d"
+        - name: WANDB_ENTITY
+          value: "timgsereda"
+      command: ["/bin/bash", "-c"]
+      args:
+        - |
+          set -ex
+
+          echo "--- 1. Installing dependencies ---"
+          apt-get update && apt-get install -y wget unzip git
+          pip install torch torchvision --index-url https://download.pytorch.org/whl/cu118
+          pip install monai[nibabel,tqdm] matplotlib numpy wandb # <--- ADDED wandb
+
+          # ... (Data preparation and git clone steps remain the same) ...
+          echo "--- 2. Preparing BraTS dataset ---"
+          DATA_URL="https://zenodo.org/records/10630732/files/BraTS-GLI-00000-000.zip?download=1"
+          DATA_DIR="/data/BraTS2023/training"
+          ZIP_FILE="/data/brats_sample.zip"
+          if [ ! -d "$DATA_DIR" ]; then
+            echo "Dataset not found. Downloading..."
+            mkdir -p "$DATA_DIR"
+            wget -O "$ZIP_FILE" "$DATA_URL"
+            unzip "$ZIP_FILE" -d "$DATA_DIR"
+            rm "$ZIP_FILE"
+          else
+            echo "Dataset already exists."
+          fi
+          
+          echo "--- 3. Cloning training repository ---"
+          cd /app
+          git clone https://github.com/tsereda/middleslice-prediction.git
+
+          echo "--- 4. Verifying environment ---"
+          python -c "import torch; import wandb; print(f'PyTorch version: {torch.__version__}'); print(f'W&B version: {wandb.__version__}')"
+          
+          echo "--- 5. Running the training script ---"
+          python /app/middleslice-prediction/train.py \
+            --data_dir /data/BraTS2023 \
+            --output_dir /data/checkpoints \
+            --epochs 10 \
+            --batch_size 8
+
+          echo "--- 6. Training complete. Pod will idle. ---"
+          tail -f /dev/null
+      
+      volumeMounts:
+        - name: workspace
+          mountPath: /app
+        - name: data
+          mountPath: /data
+        - name: shm
+          mountPath: /dev/shm
+      resources:
+        requests:
+          memory: 24Gi
+          cpu: "12"
+          nvidia.com/gpu: "1"
+        limits:
+          memory: 32Gi
+          cpu: "16"
+          nvidia.com/gpu: "1"
+  
+  volumes:
+    - name: workspace
+      emptyDir:
+        sizeLimit: 50Gi
+    - name: data
+      persistentVolumeClaim:
+        claimName: brats-pvc
+    - name: shm
+      emptyDir:
+        medium: Memory
+        sizeLimit: 16Gi
+  
+  restartPolicy: Never
