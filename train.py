@@ -31,12 +31,13 @@ class BraTS2D5Dataset(Dataset):
         self.files = []
         for patient_dir in self.patient_dirs:
             # Assumes standard BraTS file naming
+            # --- CORRECTED CODE ---
             self.files.append({
-                "t1": glob.glob(os.path.join(patient_dir, "*_t1n.nii.gz"))[0],
-                "t1ce": glob.glob(os.path.join(patient_dir, "*_t1c.nii.gz"))[0],
-                "t2": glob.glob(os.path.join(patient_dir, "*_t2w.nii.gz"))[0],
-                "flair": glob.glob(os.path.join(patient_dir, "*_t2f.nii.gz"))[0],
-                "label": glob.glob(os.path.join(patient_dir, "*_seg.nii.gz"))[0],
+                "t1": glob.glob(os.path.join(patient_dir, "*-t1n.nii.gz"))[0],
+                "t1ce": glob.glob(os.path.join(patient_dir, "*-t1c.nii.gz"))[0],
+                "t2": glob.glob(os.path.join(patient_dir, "*-t2w.nii.gz"))[0],
+                "flair": glob.glob(os.path.join(patient_dir, "*-t2f.nii.gz"))[0],
+                "label": glob.glob(os.path.join(patient_dir, "*-seg.nii.gz"))[0], # This will be the next error
             })
         
         # Preprocessing transforms for a single 3D volume

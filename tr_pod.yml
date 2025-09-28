@@ -1,7 +1,7 @@
 apiVersion: v1
 kind: Pod
 metadata:
-  name: brats-swin-unetr-wandb
+  name: brats-middleslice
 spec:
   nodeSelector:
     nautilus.io/linstor: "true"
@@ -29,7 +29,7 @@ spec:
           valueFrom:
             secretKeyRef:
               name: wandb-credentials
-              key: WANDB_API_KEY
+              key: api-key
         - name: WANDB_PROJECT
           value: "brats-swin-unetr-2.5d"
         - name: WANDB_ENTITY
@@ -37,38 +37,27 @@ spec:
       command: ["/bin/bash", "-c"]
       args:
         - |
-          set -ex
-
           echo "--- 1. Installing dependencies ---"
-          apt-get update && apt-get install -y wget unzip git
+          sudo apt-get update && sudo apt-get install -y wget unzip git p7zip-full
           pip install torch torchvision --index-url https://download.pytorch.org/whl/cu118
-          pip install monai[nibabel,tqdm] matplotlib numpy wandb # <--- ADDED wandb
+          pip install monai[nibabel,tqdm] matplotlib numpy wandb
 
-          # ... (Data preparation and git clone steps remain the same) ...
-          echo "--- 2. Preparing BraTS dataset ---"
-          DATA_URL="https://zenodo.org/records/10630732/files/BraTS-GLI-00000-000.zip?download=1"
-          DATA_DIR="/data/BraTS2023/training"
-          ZIP_FILE="/data/brats_sample.zip"
-          if [ ! -d "$DATA_DIR" ]; then
-            echo "Dataset not found. Downloading..."
-            mkdir -p "$DATA_DIR"
-            wget -O "$ZIP_FILE" "$DATA_URL"
-            unzip "$ZIP_FILE" -d "$DATA_DIR"
-            rm "$ZIP_FILE"
-          else
-            echo "Dataset already exists."
-          fi
+
           
-          echo "--- 3. Cloning training repository ---"
+          echo "--- 2. Cloning training repository ---"
           cd /app
           git clone https://github.com/tsereda/middleslice-prediction.git
+
+          echo "--- 3. Preparing BraTS dataset ---"
+          7z x /data/ASNR-MICCAI-BraTS2023-GLI-MET-TrainingData.tar.gz
+          7z x ASNR-MICCAI-BraTS2023-GLI-MET-TrainingData.tar
 
           echo "--- 4. Verifying environment ---"
           python -c "import torch; import wandb; print(f'PyTorch version: {torch.__version__}'); print(f'W&B version: {wandb.__version__}')"
           
           echo "--- 5. Running the training script ---"
           python /app/middleslice-prediction/train.py \
-            --data_dir /data/BraTS2023 \
+            --data_dir ASNR-MICCAI-BraTS2023-GLI-MET-TrainingData \
             --output_dir /data/checkpoints \
             --epochs 10 \
             --batch_size 8
@@ -99,7 +88,7 @@ spec:
         sizeLimit: 50Gi
     - name: data
       persistentVolumeClaim:
-        claimName: brats-pvc
+        claimName: brats2025-1
     - name: shm
       emptyDir:
         medium: Memory
