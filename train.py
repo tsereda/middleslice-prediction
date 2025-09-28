@@ -1,36 +1,36 @@
+# train.py
+
 import torch
 from torch.utils.data import Dataset, DataLoader
 import numpy as np
 import os
 import glob
 import argparse
+from time import time
 
 # MONAI imports
 from monai.networks.nets import SwinUNETR
 from monai.losses import DiceCELoss
-from monai.transforms import (
-    Compose,
-    LoadImaged,
-    EnsureChannelFirstd,
-    Orientationd,
-    Spacingd,
-    ScaleIntensityRanged,
-    CropForegroundd,
-    Resized,
-)
 
-# --- 1. Custom Dataset for Real BraTS Data ---
-# This class is designed to load real NIfTI files from a directory.
+# --- MODIFIED: Import from our new transforms file ---
+from transforms import get_train_transforms
+
 class BraTS2D5Dataset(Dataset):
-    def __init__(self, data_dir, image_size, spacing):
+    # --- MODIFIED: Added num_patients parameter ---
+    def __init__(self, data_dir, image_size, spacing, num_patients=None):
         self.image_size = image_size
         self.patient_dirs = sorted(glob.glob(os.path.join(data_dir, "BraTS*")))
+        
+        # --- NEW: Logic to use a subset of patients for testing ---
+        if num_patients is not None:
+            print(f"--- Using a subset of {num_patients} patients for testing. ---")
+            self.patient_dirs = self.patient_dirs[:num_patients]
+        
         if not self.patient_dirs:
             raise FileNotFoundError(f"No patient data found in '{data_dir}'. Check your --data_dir path.")
         
         self.files = []
         for patient_dir in self.patient_dirs:
-            # Assumes standard BraTS file naming
             self.files.append({
                 "t1": glob.glob(os.path.join(patient_dir, "*-t1n.nii.gz"))[0],
                 "t1ce": glob.glob(os.path.join(patient_dir, "*-t1c.nii.gz"))[0],
@@ -39,37 +39,34 @@ class BraTS2D5Dataset(Dataset):
                 "label": glob.glob(os.path.join(patient_dir, "*-seg.nii.gz"))[0],
             })
         
-        # Preprocessing transforms for a single 3D volume
-        self.transforms = Compose([
-            LoadImaged(keys=["t1", "t1ce", "t2", "flair", "label"]),
-            EnsureChannelFirstd(keys=["t1", "t1ce", "t2", "flair", "label"]),
-            Orientationd(keys=["t1", "t1ce", "t2", "flair", "label"], axcodes="RAS"),
-            Spacingd(keys=["t1", "t1ce", "t2", "flair", "label"], pixdim=spacing, mode=("bilinear", "bilinear", "bilinear", "bilinear", "nearest")),
-            ScaleIntensityRanged(keys=["t1", "t1ce", "t2", "flair"], a_min=0, a_max=4000, b_min=0.0, b_max=1.0, clip=True),
-            CropForegroundd(keys=["t1", "t1ce", "t2", "flair", "label"], source_key="t1"),
-            Resized(keys=["t1", "t1ce", "t2", "flair", "label"], spatial_size=(image_size[0], image_size[1], -1)),
-        ])
+        # --- MODIFIED: Get transforms from the dedicated function ---
+        self.transforms = get_train_transforms(image_size, spacing)
 
-        # Map a global slice index to a (volume_index, slice_in_volume_index) pair
         self.slice_map = []
         print("Mapping slices to volumes...")
+        start_time = time()
         for vol_idx, patient_files in enumerate(self.files):
-            # --- CORRECTED CODE ---
-            # To get the slice count, we must load and transform the full data dictionary
-            # because transforms like CropForegroundd depend on other keys (e.g., source_key="t1").
             sample_data = self.transforms(patient_files)
-            # --- END CORRECTION ---
-            
             num_slices = sample_data["label"].shape[3]
             for slice_idx in range(num_slices):
                 self.slice_map.append((vol_idx, slice_idx))
+            
+            # --- NEW: Progress print every 10 samples ---
+            if (vol_idx + 1) % 10 == 0 or (vol_idx + 1) == len(self.files):
+                print(f"  Processed {vol_idx + 1}/{len(self.files)} patients...")
+
+        end_time = time()
         print(f"Dataset ready. Found {len(self.slice_map)} total slices from {len(self.files)} volumes.")
+        print(f"Slice mapping took {end_time - start_time:.2f} seconds.")
+
 
     def __len__(self):
         return len(self.slice_map)
 
     def __getitem__(self, index):
         volume_idx, slice_idx = self.slice_map[index]
+        # To optimize, we re-apply transforms here. MONAI's transforms are lazy and cache,
+        # but explicit re-application is clear. A more advanced setup might cache the preprocessed volumes.
         patient_data = self.transforms(self.files[volume_idx])
         img_modalities = torch.cat([patient_data['t1'], patient_data['t1ce'], patient_data['t2'], patient_data['flair']], dim=0)
         label_volume = patient_data['label']
@@ -92,7 +89,6 @@ class BraTS2D5Dataset(Dataset):
         return input_tensor, target_tensor
 
 def get_args():
-    """Parse command line arguments."""
     parser = argparse.ArgumentParser(description="2.5D Swin UNETR training for BraTS.")
     parser.add_argument('--data_dir', type=str, required=True, help='Root directory for the BraTS dataset.')
     parser.add_argument('--output_dir', type=str, default='./checkpoints', help='Directory to save model checkpoints.')
@@ -100,10 +96,17 @@ def get_args():
     parser.add_argument('--batch_size', type=int, default=4, help='Training batch size.')
     parser.add_argument('--lr', type=float, default=1e-4, help='Learning rate.')
     parser.add_argument('--img_size', type=int, default=128, help='Image size (height and width).')
+    
+    # --- NEW: Optional argument for quick testing ---
+    parser.add_argument(
+        '--num_patients',
+        type=int,
+        default=None,
+        help='Number of patient volumes to use for quick testing (default: all).'
+    )
     return parser.parse_args()
 
 def main(args):
-    """Main training function."""
     device = torch.device("cuda" if torch.cuda.is_available() else "cpu")
     print(f"Using device: {device}")
 
@@ -112,7 +115,9 @@ def main(args):
     dataset = BraTS2D5Dataset(
         data_dir=args.data_dir,
         image_size=(args.img_size, args.img_size),
-        spacing=(1.0, 1.0, 1.0)
+        spacing=(1.0, 1.0, 1.0),
+        # --- MODIFIED: Pass the new argument ---
+        num_patients=args.num_patients
     )
     data_loader = DataLoader(dataset, batch_size=args.batch_size, shuffle=True, num_workers=4)
 
@@ -143,7 +148,6 @@ def main(args):
         avg_loss = epoch_loss / len(data_loader)
         print(f"--- Epoch {epoch + 1}/{args.epochs}, Average Loss: {avg_loss:.4f} ---")
         
-        # Save model checkpoint
         checkpoint_path = os.path.join(args.output_dir, f"swin_unetr_epoch_{epoch+1}.pth")
         torch.save(model.state_dict(), checkpoint_path)
         print(f"Checkpoint saved to {checkpoint_path}")

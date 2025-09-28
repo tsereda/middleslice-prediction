@@ -41,14 +41,13 @@ spec:
           sudo apt-get update && sudo apt-get install -y wget unzip git p7zip-full
           pip install torch torchvision --index-url https://download.pytorch.org/whl/cu118
           pip install monai[nibabel,tqdm] matplotlib numpy wandb
-
-
           
           echo "--- 2. Cloning training repository ---"
           cd /app
           git clone https://github.com/tsereda/middleslice-prediction.git
 
           echo "--- 3. Preparing BraTS dataset ---"
+          cd middleslice-prediction
           7z x /data/ASNR-MICCAI-BraTS2023-GLI-MET-TrainingData.tar.gz
           7z x ASNR-MICCAI-BraTS2023-GLI-MET-TrainingData.tar
           mkdir training
