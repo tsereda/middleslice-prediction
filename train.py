@@ -12,16 +12,14 @@ from time import time
 from monai.networks.nets import SwinUNETR
 from monai.losses import DiceCELoss
 
-# --- MODIFIED: Import from our new transforms file ---
+# Import from our new transforms file
 from transforms import get_train_transforms
 
 class BraTS2D5Dataset(Dataset):
-    # --- MODIFIED: Added num_patients parameter ---
     def __init__(self, data_dir, image_size, spacing, num_patients=None):
         self.image_size = image_size
         self.patient_dirs = sorted(glob.glob(os.path.join(data_dir, "BraTS*")))
         
-        # --- NEW: Logic to use a subset of patients for testing ---
         if num_patients is not None:
             print(f"--- Using a subset of {num_patients} patients for testing. ---")
             self.patient_dirs = self.patient_dirs[:num_patients]
@@ -39,7 +37,6 @@ class BraTS2D5Dataset(Dataset):
                 "label": glob.glob(os.path.join(patient_dir, "*-seg.nii.gz"))[0],
             })
         
-        # --- MODIFIED: Get transforms from the dedicated function ---
         self.transforms = get_train_transforms(image_size, spacing)
 
         self.slice_map = []
@@ -51,7 +48,6 @@ class BraTS2D5Dataset(Dataset):
             for slice_idx in range(num_slices):
                 self.slice_map.append((vol_idx, slice_idx))
             
-            # --- NEW: Progress print every 10 samples ---
             if (vol_idx + 1) % 10 == 0 or (vol_idx + 1) == len(self.files):
                 print(f"  Processed {vol_idx + 1}/{len(self.files)} patients...")
 
@@ -65,8 +61,6 @@ class BraTS2D5Dataset(Dataset):
 
     def __getitem__(self, index):
         volume_idx, slice_idx = self.slice_map[index]
-        # To optimize, we re-apply transforms here. MONAI's transforms are lazy and cache,
-        # but explicit re-application is clear. A more advanced setup might cache the preprocessed volumes.
         patient_data = self.transforms(self.files[volume_idx])
         img_modalities = torch.cat([patient_data['t1'], patient_data['t1ce'], patient_data['t2'], patient_data['flair']], dim=0)
         label_volume = patient_data['label']
@@ -91,13 +85,11 @@ class BraTS2D5Dataset(Dataset):
 def get_args():
     parser = argparse.ArgumentParser(description="2.5D Swin UNETR training for BraTS.")
     parser.add_argument('--data_dir', type=str, required=True, help='Root directory for the BraTS dataset.')
-    parser.add_argument('--output_dir', type=str, default='./checkpoints', help='Directory to save model checkpoints.')
+    parser.add-argument('--output_dir', type=str, default='./checkpoints', help='Directory to save model checkpoints.')
     parser.add_argument('--epochs', type=int, default=25, help='Number of training epochs.')
     parser.add_argument('--batch_size', type=int, default=4, help='Training batch size.')
     parser.add_argument('--lr', type=float, default=1e-4, help='Learning rate.')
     parser.add_argument('--img_size', type=int, default=128, help='Image size (height and width).')
-    
-    # --- NEW: Optional argument for quick testing ---
     parser.add_argument(
         '--num_patients',
         type=int,
@@ -116,13 +108,12 @@ def main(args):
         data_dir=args.data_dir,
         image_size=(args.img_size, args.img_size),
         spacing=(1.0, 1.0, 1.0),
-        # --- MODIFIED: Pass the new argument ---
         num_patients=args.num_patients
     )
     data_loader = DataLoader(dataset, batch_size=args.batch_size, shuffle=True, num_workers=4)
 
+    # --- CORRECTED CODE: Removed the deprecated `img_size` argument ---
     model = SwinUNETR(
-        img_size=(args.img_size, args.img_size),
         in_channels=12,
         out_channels=4,
         feature_size=24,
