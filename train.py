@@ -125,7 +125,7 @@ def main(args):
         spacing=(1.0, 1.0, 1.0),
         num_patients=args.num_patients
     )
-    data_loader = DataLoader(dataset, batch_size=args.batch_size, shuffle=True, num_workers=4)
+    data_loader = DataLoader(dataset, batch_size=args.batch_size, shuffle=True, num_workers=0)
 
     model = SwinUNETR(
         in_channels=12,
