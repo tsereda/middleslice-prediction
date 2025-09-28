@@ -12,7 +12,7 @@ from torch.nn import L1Loss
 from transforms import get_train_transforms
 import cv2
 
-# --- REFINED VISUALIZATION for RECONSTRUCTION (4x4 Panel) ---
+# --- REFINED VISUALIZATION for RECONSTRUCTION (4x5 Panel with Abs Diff) ---
 def create_reconstruction_log_panel(
     inputs_sample,      # Model input (Prev/Next slices), shape [8, H, W]
     target_sample,      # Ground Truth (Real middle slice), shape [4, H, W]
@@ -39,13 +39,13 @@ def create_reconstruction_log_panel(
         gt_middle_float = target_sample[i].cpu().numpy()
         pred_middle_float = output_sample[i].cpu().numpy()
         
-        # --- FIX: Clip model output to [0, 1] range before scaling ---
+        # FIX: Clip model output to [0, 1] range before scaling
         pred_middle_clipped_scaled = (np.clip(pred_middle_float, 0, 1) * 255).astype(np.uint8)
         gt_middle_scaled = (gt_middle_float * 255).astype(np.uint8)
 
-        # --- NEW: Calculate Absolute Difference ---
+        # NEW: Calculate Absolute Difference
         abs_diff_float = np.abs(pred_middle_float - gt_middle_float)
-        # Scale difference for visualization (e.g., max diff of 1.0 becomes 255)
+        # Scale difference for visualization
         abs_diff_scaled = (abs_diff_float * 255).astype(np.uint8)
         
         # Convert all to BGR for display
@@ -53,23 +53,33 @@ def create_reconstruction_log_panel(
         next_bgr = cv2.cvtColor(next_slice, cv2.COLOR_GRAY2BGR)
         pred_bgr = cv2.cvtColor(pred_middle_clipped_scaled, cv2.COLOR_GRAY2BGR)
         gt_bgr = cv2.cvtColor(gt_middle_scaled, cv2.COLOR_GRAY2BGR)
-        abs_diff_bgr = cv2.cvtColor(abs_diff_scaled, cv2.COLOR_GRAY2BGR) # Convert diff to BGR
+        abs_diff_bgr = cv2.cvtColor(abs_diff_scaled, cv2.COLOR_GRAY2BGR)
 
         # Combine into a 1x5 strip
-        row = np.hstack([prev_bgr, next_bgr, pred_bgr, gt_bgr, abs_diff_bgr]) # Added abs_diff
+        row = np.hstack([prev_bgr, next_bgr, pred_bgr, gt_bgr, abs_diff_bgr])
         
         # Create a clean header with all text, no image overlays
         header = np.full((header_height, row.shape[1], 3), 40, dtype=np.uint8)
+        
+        # --- FIX IS HERE: Text is now properly spaced and centered ---
+        
+        # 1. Draw the main modality name on the far left
         cv2.putText(header, f"{name.upper()}", (10, 20), cv2.FONT_HERSHEY_SIMPLEX, 0.6, (255, 255, 255), 1)
         
-        col_width = prev_bgr.shape[1] # Assumes all image panels have same width
-        
-        # --- Updated text positions for 5 columns ---
-        cv2.putText(header, f"Input (Z-1)", ((col_width*0)+10, 20), cv2.FONT_HERSHEY_SIMPLEX, 0.5, (200,200,200), 1)
-        cv2.putText(header, f"Input (Z+1)", ((col_width*1)+10, 20), cv2.FONT_HERSHEY_SIMPLEX, 0.5, (200,200,200), 1)
-        cv2.putText(header, f"Prediction (Z)", ((col_width*2)+10, 20), cv2.FONT_HERSHEY_SIMPLEX, 0.5, (200,200,200), 1)
-        cv2.putText(header, f"Ground Truth (Z)", ((col_width*3)+10, 20), cv2.FONT_HERSHEY_SIMPLEX, 0.5, (200,200,200), 1)
-        cv2.putText(header, f"Abs Difference", ((col_width*4)+10, 20), cv2.FONT_HERSHEY_SIMPLEX, 0.5, (200,200,200), 1) # New column header
+        # 2. Define column titles and fonts
+        col_width = prev_bgr.shape[1]
+        font = cv2.FONT_HERSHEY_SIMPLEX
+        font_scale = 0.5
+        font_color = (200, 200, 200)
+        thickness = 1
+        column_titles = ["Input (Z-1)", "Input (Z+1)", "Prediction (Z)", "Ground Truth (Z)", "Abs Difference"]
+
+        # 3. Loop through and draw each column title centered in its column
+        for j, title in enumerate(column_titles):
+            (text_width, _), _ = cv2.getTextSize(title, font, font_scale, thickness)
+            # Calculate x-coordinate to center the text in the column
+            text_x = (col_width * j) + ((col_width - text_width) // 2)
+            cv2.putText(header, title, (text_x, 20), font, font_scale, font_color, thickness)
 
         all_rows.append(np.vstack([header, row]))
 
