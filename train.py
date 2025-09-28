@@ -26,7 +26,6 @@ from torch.nn import L1Loss
 from transforms import get_train_transforms
 import cv2
 
-# --- REFINED VISUALIZATION for RECONSTRUCTION (4x5 Panel with 'Hot' Colormap Abs Diff) ---
 def create_reconstruction_log_panel(
     inputs_sample,      # Model input (Prev/Next slices), shape [8, H, W]
     target_sample,      # Ground Truth (Real middle slice), shape [4, H, W]
@@ -43,9 +42,7 @@ def create_reconstruction_log_panel(
     all_rows = []
     header_height = 30
     
-    # --- Create a row for each modality ---
     for i, name in enumerate(modalities):
-        # Inputs to the model
         prev_slice = (inputs_sample[i].cpu().numpy() * 255).astype(np.uint8)
         next_slice = (inputs_sample[i + 4].cpu().numpy() * 255).astype(np.uint8)
         
@@ -53,11 +50,9 @@ def create_reconstruction_log_panel(
         gt_middle_float = target_sample[i].cpu().numpy()
         pred_middle_float = output_sample[i].cpu().numpy()
         
-        # FIX: Clip model output to [0, 1] range before scaling
         pred_middle_clipped_scaled = (np.clip(pred_middle_float, 0, 1) * 255).astype(np.uint8)
         gt_middle_scaled = (gt_middle_float * 255).astype(np.uint8)
 
-        # --- UPDATED: Calculate and Colorize Absolute Difference with HOT colormap ---
         abs_diff_float = np.abs(pred_middle_float - gt_middle_float)
         
         # Scale difference based on a fixed range for consistency (e.g., 0.4 = max error)
