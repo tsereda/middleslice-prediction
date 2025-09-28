@@ -85,7 +85,7 @@ class BraTS2D5Dataset(Dataset):
 def get_args():
     parser = argparse.ArgumentParser(description="2.5D Swin UNETR training for BraTS.")
     parser.add_argument('--data_dir', type=str, required=True, help='Root directory for the BraTS dataset.')
-    parser.add-argument('--output_dir', type=str, default='./checkpoints', help='Directory to save model checkpoints.')
+    parser.add_argument('--output_dir', type=str, default='./checkpoints', help='Directory to save model checkpoints.')
     parser.add_argument('--epochs', type=int, default=25, help='Number of training epochs.')
     parser.add_argument('--batch_size', type=int, default=4, help='Training batch size.')
     parser.add_argument('--lr', type=float, default=1e-4, help='Learning rate.')
@@ -112,7 +112,6 @@ def main(args):
     )
     data_loader = DataLoader(dataset, batch_size=args.batch_size, shuffle=True, num_workers=4)
 
-    # --- CORRECTED CODE: Removed the deprecated `img_size` argument ---
     model = SwinUNETR(
         in_channels=12,
         out_channels=4,
