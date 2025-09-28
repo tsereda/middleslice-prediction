@@ -8,6 +8,9 @@ import glob
 import argparse
 from time import time
 
+# --- W&B INTEGRATION: Import the library ---
+import wandb
+
 # MONAI imports
 from monai.networks.nets import SwinUNETR
 from monai.losses import DiceCELoss
@@ -99,6 +102,12 @@ def get_args():
     return parser.parse_args()
 
 def main(args):
+    # --- W&B INTEGRATION: Step 1 - Initialize the run ---
+    # W&B will automatically use the project and entity from your environment variables.
+    # We pass the `args` to `config` to save all hyperparameters.
+    run_name = f"swin_unetr_2.5d_{int(time())}"
+    wandb.init(config=args, name=run_name)
+    
     device = torch.device("cuda" if torch.cuda.is_available() else "cpu")
     print(f"Using device: {device}")
 
@@ -119,6 +128,9 @@ def main(args):
         spatial_dims=2,
     ).to(device)
 
+    # --- W&B INTEGRATION: Optional - Watch the model to log gradients and topology ---
+    wandb.watch(model, log="all", log_freq=100)
+
     loss_function = DiceCELoss(to_onehot_y=True, softmax=True)
     optimizer = torch.optim.AdamW(model.parameters(), lr=args.lr)
 
@@ -138,11 +150,18 @@ def main(args):
         avg_loss = epoch_loss / len(data_loader)
         print(f"--- Epoch {epoch + 1}/{args.epochs}, Average Loss: {avg_loss:.4f} ---")
         
+        # --- W&B INTEGRATION: Step 2 - Log metrics ---
+        # Log the average loss and current epoch to W&B
+        wandb.log({"epoch": epoch + 1, "avg_loss": avg_loss})
+        
         checkpoint_path = os.path.join(args.output_dir, f"swin_unetr_epoch_{epoch+1}.pth")
         torch.save(model.state_dict(), checkpoint_path)
         print(f"Checkpoint saved to {checkpoint_path}")
 
     print("Training finished!")
+    # --- W&B INTEGRATION: Step 3 - Finish the run ---
+    wandb.finish()
+
 
 if __name__ == '__main__':
     args = get_args()

@@ -40,7 +40,7 @@ spec:
           echo "--- 1. Installing dependencies ---"
           sudo apt-get update && sudo apt-get install -y wget unzip git p7zip-full
           pip install torch torchvision --index-url https://download.pytorch.org/whl/cu118
-          pip install monai[nibabel,tqdm] matplotlib numpy wandb
+          pip install monai[nibabel,tqdm] matplotlib numpy wandb einops
           
           echo "--- 2. Cloning training repository ---"
           cd /app
