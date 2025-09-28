@@ -50,10 +50,12 @@ def create_reconstruction_log_panel(
         cv2.putText(header, f"{name.upper()}", (10, 20), cv2.FONT_HERSHEY_SIMPLEX, 0.6, (255, 255, 255), 1)
         
         col_width = prev_bgr.shape[1]
-        cv2.putText(header, f"Input (Z-1)", (col_width*0)+10, 20, cv2.FONT_HERSHEY_SIMPLEX, 0.5, (200,200,200), 1)
-        cv2.putText(header, f"Input (Z+1)", (col_width*1)+10, 20, cv2.FONT_HERSHEY_SIMPLEX, 0.5, (200,200,200), 1)
-        cv2.putText(header, f"Prediction (Z)", (col_width*2)+10, 20, cv2.FONT_HERSHEY_SIMPLEX, 0.5, (200,200,200), 1)
-        cv2.putText(header, f"Ground Truth (Z)", (col_width*3)+10, 20, cv2.FONT_HERSHEY_SIMPLEX, 0.5, (200,200,200), 1)
+        
+        # --- FIX IS HERE: Wrapped coordinates in tuples ---
+        cv2.putText(header, f"Input (Z-1)", ((col_width*0)+10, 20), cv2.FONT_HERSHEY_SIMPLEX, 0.5, (200,200,200), 1)
+        cv2.putText(header, f"Input (Z+1)", ((col_width*1)+10, 20), cv2.FONT_HERSHEY_SIMPLEX, 0.5, (200,200,200), 1)
+        cv2.putText(header, f"Prediction (Z)", ((col_width*2)+10, 20), cv2.FONT_HERSHEY_SIMPLEX, 0.5, (200,200,200), 1)
+        cv2.putText(header, f"Ground Truth (Z)", ((col_width*3)+10, 20), cv2.FONT_HERSHEY_SIMPLEX, 0.5, (200,200,200), 1)
 
         all_rows.append(np.vstack([header, row]))
 
