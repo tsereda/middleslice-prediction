@@ -22,7 +22,7 @@ from monai.transforms import (
 # --- 1. Custom Dataset for Real BraTS Data ---
 # This class is designed to load real NIfTI files from a directory.
 class BraTS2D5Dataset(Dataset):
-    def __init__(self, data_dir, image_size, spacing, mode='training'):
+    def __init__(self, data_dir, image_size, spacing, mode='ASNR-MICCAI-BraTS2023-GLI-MET-TrainingData'):
         self.image_size = image_size
         self.patient_dirs = sorted(glob.glob(os.path.join(data_dir, mode, "BraTS*")))
         if not self.patient_dirs:

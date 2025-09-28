@@ -57,7 +57,7 @@ spec:
           
           echo "--- 5. Running the training script ---"
           python /app/middleslice-prediction/train.py \
-            --data_dir ASNR-MICCAI-BraTS2023-GLI-MET-TrainingData \
+            --data_dir . \
             --output_dir /data/checkpoints \
             --epochs 10 \
             --batch_size 8
