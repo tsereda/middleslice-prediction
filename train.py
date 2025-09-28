@@ -26,7 +26,7 @@ from torch.nn import L1Loss
 from transforms import get_train_transforms
 import cv2
 
-# --- REFINED VISUALIZATION for RECONSTRUCTION (4x5 Panel with Color Abs Diff) ---
+# --- REFINED VISUALIZATION for RECONSTRUCTION (4x5 Panel with 'Hot' Colormap Abs Diff) ---
 def create_reconstruction_log_panel(
     inputs_sample,      # Model input (Prev/Next slices), shape [8, H, W]
     target_sample,      # Ground Truth (Real middle slice), shape [4, H, W]
@@ -36,7 +36,7 @@ def create_reconstruction_log_panel(
 ):
     """
     Creates a single, 4x5 composite grid for the reconstruction task,
-    including Previous, Next, Prediction, Ground Truth, and COLORIZED Absolute Difference.
+    using a 'HOT' colormap for the absolute difference for better error visualization.
     """
     
     modalities = ["t1", "t1ce", "t2", "flair"]
@@ -57,12 +57,16 @@ def create_reconstruction_log_panel(
         pred_middle_clipped_scaled = (np.clip(pred_middle_float, 0, 1) * 255).astype(np.uint8)
         gt_middle_scaled = (gt_middle_float * 255).astype(np.uint8)
 
-        # --- UPDATED: Calculate and Colorize Absolute Difference ---
+        # --- UPDATED: Calculate and Colorize Absolute Difference with HOT colormap ---
         abs_diff_float = np.abs(pred_middle_float - gt_middle_float)
-        # Scale difference for visualization (e.g., max diff of 1.0 becomes 255)
-        abs_diff_scaled_uint8 = (abs_diff_float * 255).astype(np.uint8)
-        # Apply a colormap (e.g., JET) to the scaled difference
-        abs_diff_bgr = cv2.applyColorMap(abs_diff_scaled_uint8, cv2.COLORMAP_JET)
+        
+        # Scale difference based on a fixed range for consistency (e.g., 0.4 = max error)
+        max_diff_for_viz = 0.4 
+        scaled_diff = np.clip((abs_diff_float / max_diff_for_viz) * 255, 0, 255)
+        abs_diff_uint8 = scaled_diff.astype(np.uint8)
+        
+        # Apply the HOT colormap
+        abs_diff_bgr = cv2.applyColorMap(abs_diff_uint8, cv2.COLORMAP_HOT)
         
         # Convert all other grayscale images to BGR for consistent stacking
         prev_bgr = cv2.cvtColor(prev_slice, cv2.COLOR_GRAY2BGR)
