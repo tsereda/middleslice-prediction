@@ -12,7 +12,21 @@ from torch.nn import L1Loss
 from transforms import get_train_transforms
 import cv2
 
-# --- REFINED VISUALIZATION for RECONSTRUCTION (4x5 Panel with Abs Diff) ---
+import torch
+from torch.utils.data import Dataset, DataLoader
+import numpy as np
+import os
+import glob
+import argparse
+from time import time
+import torch.multiprocessing
+import wandb
+from monai.networks.nets import SwinUNETR
+from torch.nn import L1Loss 
+from transforms import get_train_transforms
+import cv2
+
+# --- REFINED VISUALIZATION for RECONSTRUCTION (4x5 Panel with Color Abs Diff) ---
 def create_reconstruction_log_panel(
     inputs_sample,      # Model input (Prev/Next slices), shape [8, H, W]
     target_sample,      # Ground Truth (Real middle slice), shape [4, H, W]
@@ -22,7 +36,7 @@ def create_reconstruction_log_panel(
 ):
     """
     Creates a single, 4x5 composite grid for the reconstruction task,
-    including Previous, Next, Prediction, Ground Truth, and Absolute Difference.
+    including Previous, Next, Prediction, Ground Truth, and COLORIZED Absolute Difference.
     """
     
     modalities = ["t1", "t1ce", "t2", "flair"]
@@ -43,25 +57,25 @@ def create_reconstruction_log_panel(
         pred_middle_clipped_scaled = (np.clip(pred_middle_float, 0, 1) * 255).astype(np.uint8)
         gt_middle_scaled = (gt_middle_float * 255).astype(np.uint8)
 
-        # NEW: Calculate Absolute Difference
+        # --- UPDATED: Calculate and Colorize Absolute Difference ---
         abs_diff_float = np.abs(pred_middle_float - gt_middle_float)
-        # Scale difference for visualization
-        abs_diff_scaled = (abs_diff_float * 255).astype(np.uint8)
+        # Scale difference for visualization (e.g., max diff of 1.0 becomes 255)
+        abs_diff_scaled_uint8 = (abs_diff_float * 255).astype(np.uint8)
+        # Apply a colormap (e.g., JET) to the scaled difference
+        abs_diff_bgr = cv2.applyColorMap(abs_diff_scaled_uint8, cv2.COLORMAP_JET)
         
-        # Convert all to BGR for display
+        # Convert all other grayscale images to BGR for consistent stacking
         prev_bgr = cv2.cvtColor(prev_slice, cv2.COLOR_GRAY2BGR)
         next_bgr = cv2.cvtColor(next_slice, cv2.COLOR_GRAY2BGR)
         pred_bgr = cv2.cvtColor(pred_middle_clipped_scaled, cv2.COLOR_GRAY2BGR)
         gt_bgr = cv2.cvtColor(gt_middle_scaled, cv2.COLOR_GRAY2BGR)
-        abs_diff_bgr = cv2.cvtColor(abs_diff_scaled, cv2.COLOR_GRAY2BGR)
+        # abs_diff_bgr is already BGR from applyColorMap
 
         # Combine into a 1x5 strip
         row = np.hstack([prev_bgr, next_bgr, pred_bgr, gt_bgr, abs_diff_bgr])
         
         # Create a clean header with all text, no image overlays
         header = np.full((header_height, row.shape[1], 3), 40, dtype=np.uint8)
-        
-        # --- FIX IS HERE: Text is now properly spaced and centered ---
         
         # 1. Draw the main modality name on the far left
         cv2.putText(header, f"{name.upper()}", (10, 20), cv2.FONT_HERSHEY_SIMPLEX, 0.6, (255, 255, 255), 1)
