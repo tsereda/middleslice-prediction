@@ -10,75 +10,95 @@ import wandb
 from monai.networks.nets import SwinUNETR
 from monai.losses import DiceCELoss
 from transforms import get_train_transforms
-from PIL import Image, ImageDraw, ImageFont
+import cv2  # <-- Using OpenCV now
 
-# --- HELPER 1: Creates a simple 1x4 strip for a single modality ---
+# --- HELPER 1: OpenCV-based 1x4 strip for a single modality ---
 def create_modality_strip_4_panel(
     inputs_sample, gt_mask, slice_idx, batch_idx, modality_name, modality_indices
 ):
-    """Creates a 1x4 composite: [Prev Slice | Middle Slice | Next Slice | Ground Truth]"""
+    """Creates a 1x4 composite using OpenCV: [Prev | Middle | Next | GT]"""
     
-    # Extract slices and convert to 8-bit images
+    # --- Image Preparation ---
+    # Extract slices and scale to 0-255 uint8 range
     prev_slice = (inputs_sample[modality_indices["prev"]].numpy() * 255).astype(np.uint8)
     middle_slice = (inputs_sample[modality_indices["middle"]].numpy() * 255).astype(np.uint8)
     next_slice = (inputs_sample[modality_indices["next"]].numpy() * 255).astype(np.uint8)
     gt_mask_img = (gt_mask * (255 / 3)).astype(np.uint8)
-
-    img_size = prev_slice.shape[1]
-    header_height = 40
-    canvas = Image.new("RGB", (img_size * 4, img_size + header_height), (20, 20, 20))
-
-    # Paste the four images side-by-side
-    canvas.paste(Image.fromarray(prev_slice), (0, header_height))
-    canvas.paste(Image.fromarray(middle_slice), (img_size, header_height))
-    canvas.paste(Image.fromarray(next_slice), (img_size * 2, header_height))
-    canvas.paste(Image.fromarray(gt_mask_img), (img_size * 3, header_height))
     
-    # Add titles and labels
-    draw = ImageDraw.Draw(canvas)
-    try: font = ImageFont.truetype("arial.ttf", 15)
-    except IOError: font = ImageFont.load_default()
-    title = f"{modality_name.upper()} Input Context - Batch #{batch_idx}, Slice #{slice_idx}"
-    draw.text((10, 10), title, fill="white", font=font)
-    draw.text((5, header_height + 5), f"Prev ({slice_idx-1})", fill="white", font=font)
-    draw.text((img_size + 5, header_height + 5), f"Middle ({slice_idx})", fill="white", font=font)
-    draw.text((img_size * 2 + 5, header_height + 5), f"Next ({slice_idx+1})", fill="white", font=font)
-    draw.text((img_size * 3 + 5, header_height + 5), "Ground Truth", fill="white", font=font)
-    return canvas
+    # Convert grayscale images to 3-channel BGR to draw color text on them
+    prev_slice_bgr = cv2.cvtColor(prev_slice, cv2.COLOR_GRAY2BGR)
+    middle_slice_bgr = cv2.cvtColor(middle_slice, cv2.COLOR_GRAY2BGR)
+    next_slice_bgr = cv2.cvtColor(next_slice, cv2.COLOR_GRAY2BGR)
+    gt_mask_bgr = cv2.cvtColor(gt_mask_img, cv2.COLOR_GRAY2BGR)
 
-# --- HELPER 2: Creates a simple 1x4 strip for the segmentation result ---
+    # --- Text and Layout Settings ---
+    font = cv2.FONT_HERSHEY_SIMPLEX
+    font_scale = 0.5
+    font_color = (255, 255, 255) # White
+    thickness = 1
+    header_height = 40
+    img_size = prev_slice.shape[1]
+    
+    # Create a dark gray header
+    header = np.full((header_height, img_size * 4, 3), 20, dtype=np.uint8)
+    title = f"{modality_name.upper()} Input Context - Batch #{batch_idx}, Slice #{slice_idx}"
+    cv2.putText(header, title, (10, 25), font, font_scale, font_color, thickness, cv2.LINE_AA)
+
+    # Add sub-labels to each panel
+    cv2.putText(prev_slice_bgr, f"Prev ({slice_idx-1})", (5, 20), font, font_scale, font_color, thickness, cv2.LINE_AA)
+    cv2.putText(middle_slice_bgr, f"Middle ({slice_idx})", (5, 20), font, font_scale, font_color, thickness, cv2.LINE_AA)
+    cv2.putText(next_slice_bgr, f"Next ({slice_idx+1})", (5, 20), font, font_scale, font_color, thickness, cv2.LINE_AA)
+    cv2.putText(gt_mask_bgr, "Ground Truth", (5, 20), font, font_scale, font_color, thickness, cv2.LINE_AA)
+    
+    # --- Final Assembly ---
+    # Stack the 4 image panels horizontally
+    combined_panels = np.hstack([prev_slice_bgr, middle_slice_bgr, next_slice_bgr, gt_mask_bgr])
+    # Stack the header on top of the panels
+    final_image = np.vstack([header, combined_panels])
+    
+    return final_image
+
+# --- HELPER 2: OpenCV-based 1x4 strip for segmentation result ---
 def create_segmentation_strip_4_panel(
     t1ce_slice, flair_slice, gt_mask, pred_mask, slice_idx, batch_idx
 ):
-    """Creates a 1x4 composite: [Anatomy (T1ce) | Anatomy (FLAIR) | Ground Truth | Prediction]"""
-    
-    # Convert all inputs to 8-bit PIL Images
-    t1ce_img = Image.fromarray((t1ce_slice.numpy() * 255).astype(np.uint8))
-    flair_img = Image.fromarray((flair_slice.numpy() * 255).astype(np.uint8))
-    gt_mask_img = Image.fromarray((gt_mask * (255 / 3)).astype(np.uint8))
-    pred_mask_img = Image.fromarray((pred_mask * (255 / 3)).astype(np.uint8))
+    """Creates a 1x4 composite using OpenCV: [T1ce | FLAIR | GT | Prediction]"""
 
-    img_size = t1ce_img.width
+    # --- Image Preparation ---
+    t1ce_img = (t1ce_slice.numpy() * 255).astype(np.uint8)
+    flair_img = (flair_slice.numpy() * 255).astype(np.uint8)
+    gt_mask_img = (gt_mask * (255 / 3)).astype(np.uint8)
+    pred_mask_img = (pred_mask * (255 / 3)).astype(np.uint8)
+
+    t1ce_bgr = cv2.cvtColor(t1ce_img, cv2.COLOR_GRAY2BGR)
+    flair_bgr = cv2.cvtColor(flair_img, cv2.COLOR_GRAY2BGR)
+    gt_mask_bgr = cv2.cvtColor(gt_mask_img, cv2.COLOR_GRAY2BGR)
+    pred_mask_bgr = cv2.cvtColor(pred_mask_img, cv2.COLOR_GRAY2BGR)
+
+    # --- Text and Layout Settings ---
+    font = cv2.FONT_HERSHEY_SIMPLEX
+    font_scale = 0.5
+    font_color = (255, 255, 255) # White
+    thickness = 1
     header_height = 40
-    canvas = Image.new("RGB", (img_size * 4, img_size + header_height), (20, 20, 20))
-    
-    # Paste the four images side-by-side
-    canvas.paste(t1ce_img, (0, header_height))
-    canvas.paste(flair_img, (img_size, header_height))
-    canvas.paste(gt_mask_img, (img_size * 2, header_height))
-    canvas.paste(pred_mask_img, (img_size * 3, header_height))
-    
-    # Add titles and labels
-    draw = ImageDraw.Draw(canvas)
-    try: font = ImageFont.truetype("arial.ttf", 15)
-    except IOError: font = ImageFont.load_default()
+    img_size = t1ce_img.shape[1]
+
+    # Create a dark gray header
+    header = np.full((header_height, img_size * 4, 3), 20, dtype=np.uint8)
     title = f"Segmentation Output - Batch #{batch_idx}, Slice #{slice_idx}"
-    draw.text((10, 10), title, fill="white", font=font)
-    draw.text((5, header_height + 5), "Anatomy (T1ce)", fill="white", font=font)
-    draw.text((img_size + 5, header_height + 5), "Anatomy (FLAIR)", fill="white", font=font)
-    draw.text((img_size * 2 + 5, header_height + 5), "Ground Truth", fill="white", font=font)
-    draw.text((img_size * 3 + 5, header_height + 5), "Prediction", fill="white", font=font)
-    return canvas
+    cv2.putText(header, title, (10, 25), font, font_scale, font_color, thickness, cv2.LINE_AA)
+
+    # Add sub-labels to each panel
+    cv2.putText(t1ce_bgr, "Anatomy (T1ce)", (5, 20), font, font_scale, font_color, thickness, cv2.LINE_AA)
+    cv2.putText(flair_bgr, "Anatomy (FLAIR)", (5, 20), font, font_scale, font_color, thickness, cv2.LINE_AA)
+    cv2.putText(gt_mask_bgr, "Ground Truth", (5, 20), font, font_scale, font_color, thickness, cv2.LINE_AA)
+    cv2.putText(pred_mask_bgr, "Prediction", (5, 20), font, font_scale, font_color, thickness, cv2.LINE_AA)
+
+    # --- Final Assembly ---
+    combined_panels = np.hstack([t1ce_bgr, flair_bgr, gt_mask_bgr, pred_mask_bgr])
+    final_image = np.vstack([header, combined_panels])
+
+    return final_image
 
 
 class BraTS2D5Dataset(Dataset):
@@ -102,12 +122,17 @@ class BraTS2D5Dataset(Dataset):
                 print(f"   Processed {i + 1}/{len(self.files)} patients...")
         print(f"--- Volume processing took {time() - start_time:.2f} seconds. ---")
         self.slice_map = []
-        print("Mapping slices to volumes...")
+        print("Mapping and filtering slices to create dataset...")
         for vol_idx, p_data in enumerate(self.processed_volumes):
             num_slices = p_data["label"].shape[3]
+            brain_volume = p_data["t1ce"] 
+            label_volume = p_data["label"]
             for slice_idx in range(num_slices):
-                self.slice_map.append((vol_idx, slice_idx))
-        print(f"Dataset ready. Found {len(self.slice_map)} total slices from {len(self.files)} volumes.")
+                label_slice = label_volume[0, :, :, slice_idx]
+                brain_slice = brain_volume[0, :, :, slice_idx]
+                if torch.any(label_slice > 0) or torch.mean(brain_slice) > 0.1:
+                    self.slice_map.append((vol_idx, slice_idx))
+        print(f"Dataset ready. Found {len(self.slice_map)} meaningful slices from {len(self.files)} volumes.")
     def __len__(self):
         return len(self.slice_map)
     def __getitem__(self, index):
@@ -129,7 +154,7 @@ def get_args():
     # ... (get_args function is unchanged) ...
     parser = argparse.ArgumentParser(description="2.5D Swin UNETR training for BraTS.")
     parser.add_argument('--data_dir', type=str, required=True, help='Root directory for the BraTS dataset.')
-    parser.add_argument('--output_dir', type=str, default='./checkpoints', help='Directory to save model checkpoints.')
+    parser.add.argument('--output_dir', type=str, default='./checkpoints', help='Directory to save model checkpoints.')
     parser.add_argument('--epochs', type=int, default=25, help='Number of training epochs.')
     parser.add_argument('--batch_size', type=int, default=4, help='Training batch size.')
     parser.add_argument('--lr', type=float, default=1e-4, help='Learning rate.')
@@ -170,7 +195,6 @@ def main(args):
             optimizer.step()
             epoch_loss += loss.item()
             
-            # --- MODIFIED: Logging 5 simple 4-panel strips ---
             if (i + 1) % 25 == 0:
                 print(f"   Epoch {epoch + 1}/{args.epochs}, Batch {i + 1}/{num_batches}...")
                 
@@ -189,18 +213,22 @@ def main(args):
 
                 # 1. Log the 4 modality strips
                 for name, indices in modalities.items():
-                    modality_img = create_modality_strip_4_panel(
+                    modality_img_bgr = create_modality_strip_4_panel(
                         inputs_sample, gt_mask, slice_idx_sample, i + 1, name, indices
                     )
-                    log_payload[f"samples/{name}_strip"] = wandb.Image(modality_img)
+                    # Convert BGR (OpenCV default) to RGB for correct colors in W&B
+                    modality_img_rgb = cv2.cvtColor(modality_img_bgr, cv2.COLOR_BGR2RGB)
+                    log_payload[f"samples/{name}_strip"] = wandb.Image(modality_img_rgb)
                 
                 # 2. Log the 5th segmentation result strip
                 t1ce_slice = inputs_sample[modalities['t1ce']['middle']]
                 flair_slice = inputs_sample[modalities['flair']['middle']]
-                seg_img = create_segmentation_strip_4_panel(
+                seg_img_bgr = create_segmentation_strip_4_panel(
                     t1ce_slice, flair_slice, gt_mask, pred_mask, slice_idx_sample, i + 1
                 )
-                log_payload["samples/segmentation_strip"] = wandb.Image(seg_img)
+                # Convert BGR to RGB
+                seg_img_rgb = cv2.cvtColor(seg_img_bgr, cv2.COLOR_BGR2RGB)
+                log_payload["samples/segmentation_strip"] = wandb.Image(seg_img_rgb)
 
                 wandb.log(log_payload)
         
