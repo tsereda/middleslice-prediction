@@ -143,7 +143,13 @@ def main(args):
     for epoch in range(args.epochs):
         model.train()
         epoch_loss = 0
+
+        num_batches = len(data_loader)
+        
         for i, (inputs, labels) in enumerate(data_loader):
+            if (i + 1) % 10 == 0:
+                print(f"  Epoch {epoch + 1}/{args.epochs}, Batch {i + 1}/{num_batches}...")
+
             inputs, labels = inputs.to(device), labels.to(device)
             optimizer.zero_grad()
             outputs = model(inputs)
@@ -152,8 +158,9 @@ def main(args):
             optimizer.step()
             epoch_loss += loss.item()
         
-        avg_loss = epoch_loss / len(data_loader)
+        avg_loss = epoch_loss / num_batches # Use num_batches here
         print(f"--- Epoch {epoch + 1}/{args.epochs}, Average Loss: {avg_loss:.4f} ---")
+        
         
         wandb.log({"epoch": epoch + 1, "avg_loss": avg_loss})
         
