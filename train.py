@@ -20,7 +20,10 @@ def create_reconstruction_log_panel(
     slice_idx,
     batch_idx
 ):
-    """Creates a single, 4x4 composite grid for the reconstruction task."""
+    """
+    Creates a single, 4x5 composite grid for the reconstruction task,
+    including Previous, Next, Prediction, Ground Truth, and Absolute Difference.
+    """
     
     modalities = ["t1", "t1ce", "t2", "flair"]
     all_rows = []
@@ -33,29 +36,40 @@ def create_reconstruction_log_panel(
         next_slice = (inputs_sample[i + 4].cpu().numpy() * 255).astype(np.uint8)
         
         # Ground Truth and Model Prediction
-        gt_middle = (target_sample[i].cpu().numpy() * 255).astype(np.uint8)
-        pred_middle = (output_sample[i].cpu().numpy() * 255).astype(np.uint8)
+        gt_middle_float = target_sample[i].cpu().numpy()
+        pred_middle_float = output_sample[i].cpu().numpy()
+        
+        # --- FIX: Clip model output to [0, 1] range before scaling ---
+        pred_middle_clipped_scaled = (np.clip(pred_middle_float, 0, 1) * 255).astype(np.uint8)
+        gt_middle_scaled = (gt_middle_float * 255).astype(np.uint8)
 
+        # --- NEW: Calculate Absolute Difference ---
+        abs_diff_float = np.abs(pred_middle_float - gt_middle_float)
+        # Scale difference for visualization (e.g., max diff of 1.0 becomes 255)
+        abs_diff_scaled = (abs_diff_float * 255).astype(np.uint8)
+        
         # Convert all to BGR for display
         prev_bgr = cv2.cvtColor(prev_slice, cv2.COLOR_GRAY2BGR)
         next_bgr = cv2.cvtColor(next_slice, cv2.COLOR_GRAY2BGR)
-        gt_bgr = cv2.cvtColor(gt_middle, cv2.COLOR_GRAY2BGR)
-        pred_bgr = cv2.cvtColor(pred_middle, cv2.COLOR_GRAY2BGR)
+        pred_bgr = cv2.cvtColor(pred_middle_clipped_scaled, cv2.COLOR_GRAY2BGR)
+        gt_bgr = cv2.cvtColor(gt_middle_scaled, cv2.COLOR_GRAY2BGR)
+        abs_diff_bgr = cv2.cvtColor(abs_diff_scaled, cv2.COLOR_GRAY2BGR) # Convert diff to BGR
 
-        # Combine into a 1x4 strip
-        row = np.hstack([prev_bgr, next_bgr, pred_bgr, gt_bgr])
+        # Combine into a 1x5 strip
+        row = np.hstack([prev_bgr, next_bgr, pred_bgr, gt_bgr, abs_diff_bgr]) # Added abs_diff
         
         # Create a clean header with all text, no image overlays
         header = np.full((header_height, row.shape[1], 3), 40, dtype=np.uint8)
         cv2.putText(header, f"{name.upper()}", (10, 20), cv2.FONT_HERSHEY_SIMPLEX, 0.6, (255, 255, 255), 1)
         
-        col_width = prev_bgr.shape[1]
+        col_width = prev_bgr.shape[1] # Assumes all image panels have same width
         
-        # --- FIX IS HERE: Wrapped coordinates in tuples ---
+        # --- Updated text positions for 5 columns ---
         cv2.putText(header, f"Input (Z-1)", ((col_width*0)+10, 20), cv2.FONT_HERSHEY_SIMPLEX, 0.5, (200,200,200), 1)
         cv2.putText(header, f"Input (Z+1)", ((col_width*1)+10, 20), cv2.FONT_HERSHEY_SIMPLEX, 0.5, (200,200,200), 1)
         cv2.putText(header, f"Prediction (Z)", ((col_width*2)+10, 20), cv2.FONT_HERSHEY_SIMPLEX, 0.5, (200,200,200), 1)
         cv2.putText(header, f"Ground Truth (Z)", ((col_width*3)+10, 20), cv2.FONT_HERSHEY_SIMPLEX, 0.5, (200,200,200), 1)
+        cv2.putText(header, f"Abs Difference", ((col_width*4)+10, 20), cv2.FONT_HERSHEY_SIMPLEX, 0.5, (200,200,200), 1) # New column header
 
         all_rows.append(np.vstack([header, row]))
 
