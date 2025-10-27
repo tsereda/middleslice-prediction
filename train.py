@@ -25,7 +25,8 @@ class BraTS2D5Dataset(Dataset):
             patient_dirs = patient_dirs[:num_patients]
         if not patient_dirs:
             raise FileNotFoundError(f"No patient data found in '{data_dir}'. Check your --data_dir path.")
-        self.files = [{"t1": glob.glob(os.path.join(p, "*-t1n.nii.gz"))[0],"t1ce": glob.glob(os.path.join(p, "*-t1c.nii.gz"))[0],"t2": glob.glob(os.path.join(p, "*-t2w.nii.gz"))[0],"flair": glob.glob(os.path.join(p, "*-t2f.nii.gz"))[0],"label": glob.glob(os.path.join(p, "*-seg.nii.gz"))[0]} for p in patient_dirs]
+        # Fixed file patterns to match BraTS2020 naming convention
+        self.files = [{"t1": glob.glob(os.path.join(p, "*_t1.nii"))[0],"t1ce": glob.glob(os.path.join(p, "*_t1ce.nii"))[0],"t2": glob.glob(os.path.join(p, "*_t2.nii"))[0],"flair": glob.glob(os.path.join(p, "*_flair.nii"))[0],"label": glob.glob(os.path.join(p, "*_seg.nii"))[0]} for p in patient_dirs]
         transforms = get_train_transforms(image_size, spacing)
         print("--- Pre-loading and processing volumes... ---")
         start_time = time()
