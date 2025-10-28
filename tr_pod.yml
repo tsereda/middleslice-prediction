@@ -1,7 +1,7 @@
 apiVersion: v1
 kind: Pod
 metadata:
-  name: tim-brats-middleslice
+  name: brats-middleslice
 spec:
   nodeSelector:
     nautilus.io/linstor: "true"
@@ -87,7 +87,7 @@ spec:
         sizeLimit: 50Gi
     - name: data
       persistentVolumeClaim:
-        claimName: brats2025-5
+        claimName: brats2025-6
     - name: shm
       emptyDir:
         medium: Memory

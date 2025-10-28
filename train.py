@@ -78,7 +78,7 @@ def get_args():
 def main(args):
     torch.multiprocessing.set_sharing_strategy('file_system')
     run_name = f"swin_unetr_reconstruction_{int(time())}"
-    wandb.init(project="brats-2.5d-reconstruction", config=args, name=run_name)
+    wandb.init(project="brats-2.5d-reconstruction", config=args, name=run_name, entity="")
     
     device = torch.device("cuda" if torch.cuda.is_available() else "cpu")
     print(f"Using device: {device}")
