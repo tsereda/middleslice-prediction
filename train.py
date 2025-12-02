@@ -1,4 +1,4 @@
-# train.py
+# train.py - Updated for BraTS 2023 compatibility
 
 import torch
 from torch.utils.data import Dataset, DataLoader
@@ -25,17 +25,106 @@ class BraTS2D5Dataset(Dataset):
             patient_dirs = patient_dirs[:num_patients]
         if not patient_dirs:
             raise FileNotFoundError(f"No patient data found in '{data_dir}'. Check your --data_dir path.")
-        # Fixed file patterns to match BraTS2020 naming convention
-        self.files = [{"t1": glob.glob(os.path.join(p, "*_t1.nii"))[0],"t1ce": glob.glob(os.path.join(p, "*_t1ce.nii"))[0],"t2": glob.glob(os.path.join(p, "*_t2.nii"))[0],"flair": glob.glob(os.path.join(p, "*_flair.nii"))[0],"label": glob.glob(os.path.join(p, "*_seg.nii"))[0]} for p in patient_dirs]
+        
+        print(f"Found {len(patient_dirs)} patient directories")
+        
+        # Updated file patterns to match BraTS2023 naming convention
+        self.files = []
+        skipped_patients = 0
+        
+        for p in patient_dirs:
+            # Try different file extensions and patterns for BraTS 2023
+            # BraTS 2023 can use either underscore or hyphen separators, and .nii or .nii.gz extensions
+            t1_patterns = ["*_t1.nii*", "*-t1.nii*", "*_T1.nii*", "*-T1.nii*"]
+            t1ce_patterns = ["*_t1ce.nii*", "*-t1ce.nii*", "*_T1CE.nii*", "*-T1CE.nii*", "*_T1c.nii*", "*-T1c.nii*"]
+            t2_patterns = ["*_t2.nii*", "*-t2.nii*", "*_T2.nii*", "*-T2.nii*"]
+            flair_patterns = ["*_flair.nii*", "*-flair.nii*", "*_FLAIR.nii*", "*-FLAIR.nii*"]
+            seg_patterns = ["*_seg.nii*", "*-seg.nii*", "*_SEG.nii*", "*-SEG.nii*"]
+            
+            # Find files using multiple patterns
+            t1_files = []
+            for pattern in t1_patterns:
+                t1_files.extend(glob.glob(os.path.join(p, pattern)))
+                if t1_files:
+                    break
+                    
+            t1ce_files = []
+            for pattern in t1ce_patterns:
+                t1ce_files.extend(glob.glob(os.path.join(p, pattern)))
+                if t1ce_files:
+                    break
+                    
+            t2_files = []
+            for pattern in t2_patterns:
+                t2_files.extend(glob.glob(os.path.join(p, pattern)))
+                if t2_files:
+                    break
+                    
+            flair_files = []
+            for pattern in flair_patterns:
+                flair_files.extend(glob.glob(os.path.join(p, pattern)))
+                if flair_files:
+                    break
+                    
+            seg_files = []
+            for pattern in seg_patterns:
+                seg_files.extend(glob.glob(os.path.join(p, pattern)))
+                if seg_files:
+                    break
+            
+            # Check if all required files are found
+            if not all([t1_files, t1ce_files, t2_files, flair_files, seg_files]):
+                print(f"Warning: Missing files in {os.path.basename(p)}")
+                print(f"  T1: {len(t1_files)}, T1CE: {len(t1ce_files)}, T2: {len(t2_files)}, FLAIR: {len(flair_files)}, SEG: {len(seg_files)}")
+                
+                # Debug: show what files are actually present
+                all_nii_files = glob.glob(os.path.join(p, "*.nii*"))
+                print(f"  All .nii* files found: {[os.path.basename(f) for f in all_nii_files]}")
+                
+                skipped_patients += 1
+                continue
+                
+            self.files.append({
+                "t1": t1_files[0],
+                "t1ce": t1ce_files[0], 
+                "t2": t2_files[0],
+                "flair": flair_files[0],
+                "label": seg_files[0]
+            })
+        
+        if not self.files:
+            raise ValueError(f"No valid patient data found. All {len(patient_dirs)} directories were missing required files.")
+            
+        if skipped_patients > 0:
+            print(f"Note: Skipped {skipped_patients} patients due to missing files. Using {len(self.files)} patients.")
+        
+        # Load and process transforms
         transforms = get_train_transforms(image_size, spacing)
         print("--- Pre-loading and processing volumes... ---")
         start_time = time()
         self.processed_volumes = []
+        failed_volumes = 0
+        
         for i, patient_files in enumerate(self.files):
-            self.processed_volumes.append(transforms(patient_files))
-            if (i + 1) % 10 == 0 or (i + 1) == len(self.files):
-                print(f"   Processed {i + 1}/{len(self.files)} patients...")
+            try:
+                processed_volume = transforms(patient_files)
+                self.processed_volumes.append(processed_volume)
+                if (i + 1) % 10 == 0 or (i + 1) == len(self.files):
+                    print(f"   Processed {i + 1}/{len(self.files)} patients...")
+            except Exception as e:
+                print(f"   Error processing patient {i+1}: {e}")
+                failed_volumes += 1
+                continue
+                
+        if failed_volumes > 0:
+            print(f"Warning: Failed to process {failed_volumes} volumes. Using {len(self.processed_volumes)} volumes.")
+            
+        if not self.processed_volumes:
+            raise ValueError("No volumes could be processed successfully!")
+            
         print(f"--- Volume processing took {time() - start_time:.2f} seconds. ---")
+        
+        # Create slice mapping
         self.slice_map = []
         print("Mapping all available slices to create dataset...")
         for vol_idx, p_data in enumerate(self.processed_volumes):
@@ -43,7 +132,7 @@ class BraTS2D5Dataset(Dataset):
             # Ensure we have a valid context (prev and next slice)
             for slice_idx in range(1, num_slices - 1): 
                 self.slice_map.append((vol_idx, slice_idx))
-        print(f"Dataset ready. Using all {len(self.slice_map)} available slices from {len(self.files)} volumes.")
+        print(f"Dataset ready. Using all {len(self.slice_map)} available slices from {len(self.processed_volumes)} volumes.")
 
     def __len__(self):
         return len(self.slice_map)
@@ -64,7 +153,7 @@ class BraTS2D5Dataset(Dataset):
 
 
 def get_args():
-    parser = argparse.ArgumentParser(description="2.5D Swin UNETR for Slice Reconstruction.")
+    parser = argparse.ArgumentParser(description="2.5D Swin UNETR for Slice Reconstruction - BraTS 2023 Compatible.")
     parser.add_argument('--data_dir', type=str, required=True, help='Root directory for the BraTS dataset.')
     parser.add_argument('--output_dir', type=str, default='./checkpoints', help='Directory to save model checkpoints.')
     parser.add_argument('--epochs', type=int, default=50, help='Number of training epochs.')
@@ -84,7 +173,19 @@ def main(args):
     print(f"Using device: {device}")
     os.makedirs(args.output_dir, exist_ok=True)
 
-    dataset = BraTS2D5Dataset(data_dir=args.data_dir, image_size=(args.img_size, args.img_size), spacing=(1.0, 1.0, 1.0), num_patients=args.num_patients)
+    # Create dataset with enhanced error handling
+    try:
+        dataset = BraTS2D5Dataset(
+            data_dir=args.data_dir, 
+            image_size=(args.img_size, args.img_size), 
+            spacing=(1.0, 1.0, 1.0), 
+            num_patients=args.num_patients
+        )
+    except Exception as e:
+        print(f"Error creating dataset: {e}")
+        print("Please check your data directory and file structure.")
+        return
+        
     data_loader = DataLoader(dataset, batch_size=args.batch_size, shuffle=True, num_workers=8)
 
     model = SwinUNETR(in_channels=8, out_channels=4, feature_size=24, spatial_dims=2).to(device)
@@ -112,7 +213,7 @@ def main(args):
             if (i + 1) % 100 == 0:
                 print(f"   Epoch {epoch + 1}/{args.epochs}, Batch {i + 1}/{num_batches} | L1 Loss: {loss.item():.4f}")
                 
-                # The call to the function remains exactly the same
+                # Log reconstruction samples
                 panel_bgr = create_reconstruction_log_panel(
                     inputs[0].detach(), 
                     targets[0].detach(), 
