@@ -1,4 +1,4 @@
-# train.py - Updated for BraTS 2023 compatibility
+# train.py - Updated for BraTS 2023 with correct modality names
 
 import torch
 from torch.utils.data import Dataset, DataLoader
@@ -29,17 +29,17 @@ class BraTS2D5Dataset(Dataset):
         print(f"Found {len(patient_dirs)} patient directories")
         
         # Updated file patterns to match BraTS2023 naming convention
+        # BraTS 2023 uses: t1n, t1c, t2w, t2f instead of t1, t1ce, t2, flair
         self.files = []
         skipped_patients = 0
         
         for p in patient_dirs:
-            # Try different file extensions and patterns for BraTS 2023
-            # BraTS 2023 can use either underscore or hyphen separators, and .nii or .nii.gz extensions
-            t1_patterns = ["*_t1.nii*", "*-t1.nii*", "*_T1.nii*", "*-T1.nii*"]
-            t1ce_patterns = ["*_t1ce.nii*", "*-t1ce.nii*", "*_T1CE.nii*", "*-T1CE.nii*", "*_T1c.nii*", "*-T1c.nii*"]
-            t2_patterns = ["*_t2.nii*", "*-t2.nii*", "*_T2.nii*", "*-T2.nii*"]
-            flair_patterns = ["*_flair.nii*", "*-flair.nii*", "*_FLAIR.nii*", "*-FLAIR.nii*"]
-            seg_patterns = ["*_seg.nii*", "*-seg.nii*", "*_SEG.nii*", "*-SEG.nii*"]
+            # BraTS 2023 modality patterns with hyphen separators and .nii.gz extension
+            t1_patterns = ["*-t1n.nii*", "*_t1n.nii*"]  # T1 native
+            t1ce_patterns = ["*-t1c.nii*", "*_t1c.nii*"]  # T1 contrast-enhanced
+            t2_patterns = ["*-t2w.nii*", "*_t2w.nii*"]  # T2-weighted
+            flair_patterns = ["*-t2f.nii*", "*_t2f.nii*"]  # T2-FLAIR
+            seg_patterns = ["*-seg.nii*", "*_seg.nii*"]  # Segmentation
             
             # Find files using multiple patterns
             t1_files = []
@@ -75,7 +75,7 @@ class BraTS2D5Dataset(Dataset):
             # Check if all required files are found
             if not all([t1_files, t1ce_files, t2_files, flair_files, seg_files]):
                 print(f"Warning: Missing files in {os.path.basename(p)}")
-                print(f"  T1: {len(t1_files)}, T1CE: {len(t1ce_files)}, T2: {len(t2_files)}, FLAIR: {len(flair_files)}, SEG: {len(seg_files)}")
+                print(f"  T1N: {len(t1_files)}, T1C: {len(t1ce_files)}, T2W: {len(t2_files)}, T2F: {len(flair_files)}, SEG: {len(seg_files)}")
                 
                 # Debug: show what files are actually present
                 all_nii_files = glob.glob(os.path.join(p, "*.nii*"))
@@ -85,11 +85,11 @@ class BraTS2D5Dataset(Dataset):
                 continue
                 
             self.files.append({
-                "t1": t1_files[0],
-                "t1ce": t1ce_files[0], 
-                "t2": t2_files[0],
-                "flair": flair_files[0],
-                "label": seg_files[0]
+                "t1": t1_files[0],      # T1 native -> t1
+                "t1ce": t1ce_files[0],  # T1 contrast -> t1ce
+                "t2": t2_files[0],      # T2 weighted -> t2  
+                "flair": flair_files[0], # T2 FLAIR -> flair
+                "label": seg_files[0]   # Segmentation -> label
             })
         
         if not self.files:
@@ -166,8 +166,8 @@ def get_args():
 
 def main(args):
     torch.multiprocessing.set_sharing_strategy('file_system')
-    run_name = f"swin_unetr_reconstruction_{int(time())}"
-    wandb.init(project="brats-2.5d-reconstruction", config=args, name=run_name, entity="")
+    run_name = f"swin_unetr_reconstruction_brats2023_{int(time())}"
+    wandb.init(project="brats2023-2.5d-reconstruction", config=args, name=run_name, entity="")
     
     device = torch.device("cuda" if torch.cuda.is_available() else "cpu")
     print(f"Using device: {device}")
