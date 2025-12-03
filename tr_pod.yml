@@ -1,7 +1,7 @@
 apiVersion: v1
 kind: Pod
 metadata:
-  name: brats-middleslice
+  name: brats-middleslice-5
 spec:
   nodeSelector:
     nautilus.io/linstor: "true"
@@ -40,7 +40,7 @@ spec:
           echo "--- 1. Installing dependencies ---"
           sudo apt-get update && sudo apt-get install -y wget unzip git p7zip-full
           pip install torch torchvision --index-url https://download.pytorch.org/whl/cu118
-          pip install monai[nibabel,tqdm] matplotlib numpy wandb einops
+          pip install monai[nibabel,tqdm] matplotlib numpy wandb einops gdown
           
           echo "--- 2. Cloning training repository ---"
           cd /app
@@ -48,14 +48,16 @@ spec:
 
           echo "--- 3. Preparing BraTS dataset ---"
           cd middleslice-prediction
-          unzip /data/brats20-dataset-training-validation.zip
+          #unzip /data/brats20-dataset-training-validation.zip
+          gdown 1ikT-TKbwT7WOBAmqtsCwcnYuaB7bbWIr
+          unzip  BraTS_126_samples.zip
 
           echo "--- 4. Verifying environment ---"
           python -c "import torch; import wandb; print(f'PyTorch version: {torch.__version__}'); print(f'W&B version: {wandb.__version__}')"
           
           echo "--- 5. Running the training script ---"
           python train.py \
-            --data_dir BraTS2020_TrainingData/MICCAI_BraTS2020_TrainingData  \
+            --data_dir BraTS_126_samples  \
             --output_dir /data/checkpoints \
             --epochs 10 \
             --batch_size 8 \
@@ -87,7 +89,7 @@ spec:
         sizeLimit: 50Gi
     - name: data
       persistentVolumeClaim:
-        claimName: brats2025-6
+        claimName: brats2025-5
     - name: shm
       emptyDir:
         medium: Memory
