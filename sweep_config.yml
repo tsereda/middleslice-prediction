@@ -1,0 +1,9 @@
+program: train_sweep.py
+method: grid
+metric:
+  name: avg_epoch_l1_loss
+  goal: minimize
+
+parameters:
+  model_type:
+    values: ['swin_unetr', 'unetr', 'basic_unet']

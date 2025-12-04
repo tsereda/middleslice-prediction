@@ -56,12 +56,13 @@ spec:
           python -c "import torch; import wandb; print(f'PyTorch version: {torch.__version__}'); print(f'W&B version: {wandb.__version__}')"
           
           echo "--- 5. Running the training script ---"
-          python train.py \
-            --data_dir BraTS_126_samples  \
-            --output_dir /data/checkpoints \
-            --epochs 10 \
-            --batch_size 8 \
-            --num_patients 20
+          #python train.py \
+          #  --data_dir BraTS_126_samples  \
+          #  --output_dir /data/checkpoints \
+          #  --epochs 10 \
+          #  --batch_size 8 \
+          #  --num_patients 20
+          wandb agent timgsereda/middleslice-prediction/3m9f9mqp
 
           echo "--- 6. Training complete. Pod will idle. ---"
           tail -f /dev/null
