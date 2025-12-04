@@ -5,5 +5,19 @@ metric:
   goal: minimize
 
 parameters:
+  data_dir:
+    value: 'BraTS_126_samples'
+  output_dir:
+    value: '/data/checkpoints'
+  epochs:
+    value: 10
+  batch_size:
+    value: 8
+  lr:
+    value: 0.0001
+  img_size:
+    value: 256
+  feature_size:
+    value: 24
   model_type:
     values: ['swin_unetr', 'unetr', 'basic_unet']

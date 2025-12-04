@@ -189,7 +189,7 @@ def create_model(model_type, feature_size=24, device='cuda'):
 
 def get_args():
     parser = argparse.ArgumentParser(description="2.5D Model Sweep for Slice Reconstruction - BraTS 2023")
-    parser.add_argument('--data_dir', type=str, required=True, help='Root directory for the BraTS dataset.')
+    parser.add_argument('--data_dir', type=str, default='BraTS_126_samples', help='Root directory for the BraTS dataset.')
     parser.add_argument('--output_dir', type=str, default='./checkpoints', help='Directory to save model checkpoints.')
     parser.add_argument('--epochs', type=int, default=50, help='Number of training epochs.')
     parser.add_argument('--batch_size', type=int, default=8, help='Training batch size.')
