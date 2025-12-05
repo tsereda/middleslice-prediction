@@ -1,96 +1,85 @@
-apiVersion: v1
-kind: Pod
+apiVersion: batch/v1
+kind: Job
 metadata:
-  name: brats-middleslice-5
+  name: brats-middleslice-4
 spec:
-  nodeSelector:
-    nautilus.io/linstor: "true"
-  affinity:
-    nodeAffinity:
-      requiredDuringSchedulingIgnoredDuringExecution:
-        nodeSelectorTerms:  
-        - matchExpressions:
-          - key: nvidia.com/gpu.product
-            operator: In
-            values:
-            - NVIDIA-A10
-            - NVIDIA-GeForce-RTX-3090
-            - NVIDIA-GeForce-RTX-4090
-            - NVIDIA-RTX-A6000
-            - Quadro-RTX-8000
-  tolerations:
-    - key: nvidia.com/gpu
-      operator: Exists
-  containers:
-    - name: swin-unetr-training
-      image: nvcr.io/nvidia/pytorch:24.09-py3
-      env:
-        - name: WANDB_API_KEY
-          valueFrom:
-            secretKeyRef:
-              name: wandb-credentials
-              key: api-key
-        - name: WANDB_PROJECT
-          value: "brats-swin-unetr-2.5d"
-        - name: WANDB_ENTITY
-          value: "timgsereda"
-      command: ["/bin/bash", "-c"]
-      args:
-        - |
-          echo "--- 1. Installing dependencies ---"
-          sudo apt-get update && sudo apt-get install -y wget unzip git p7zip-full
-          pip install torch torchvision --index-url https://download.pytorch.org/whl/cu118
-          pip install monai[nibabel,tqdm] matplotlib numpy wandb einops gdown
-          
-          echo "--- 2. Cloning training repository ---"
-          cd /app
-          git clone https://github.com/tsereda/middleslice-prediction.git
+  template:
+    spec:
+      nodeSelector:
+        nautilus.io/linstor: "true"
+      tolerations:
+        - key: nvidia.com/gpu
+          operator: Exists
+      containers:
+        - name: swin-unetr-training
+          image: nvcr.io/nvidia/pytorch:24.09-py3
+          env:
+            - name: WANDB_API_KEY
+              valueFrom:
+                secretKeyRef:
+                  name: wandb-credentials
+                  key: api-key
+            - name: WANDB_PROJECT
+              value: "brats-swin-unetr-2.5d"
+            - name: WANDB_ENTITY
+              value: "timgsereda"
+          command: ["/bin/bash", "-c"]
+          args:
+            - |
+              echo "--- 1. Installing dependencies ---"
+              sudo apt-get update && sudo apt-get install -y wget unzip git p7zip-full
+              pip install torch torchvision --index-url https://download.pytorch.org/whl/cu118
+              pip install monai[nibabel,tqdm] matplotlib numpy wandb einops gdown
+              
+              echo "--- 2. Cloning training repository ---"
+              cd /app
+              git clone https://github.com/tsereda/middleslice-prediction.git
 
-          echo "--- 3. Preparing BraTS dataset ---"
-          cd middleslice-prediction
-          #unzip /data/brats20-dataset-training-validation.zip
-          gdown 1ikT-TKbwT7WOBAmqtsCwcnYuaB7bbWIr
-          unzip  BraTS_126_samples.zip
+              echo "--- 3. Preparing BraTS dataset ---"
+              cd middleslice-prediction
+              #unzip /data/brats20-dataset-training-validation.zip
+              gdown 1ikT-TKbwT7WOBAmqtsCwcnYuaB7bbWIr
+              unzip  BraTS_126_samples.zip
 
-          echo "--- 4. Verifying environment ---"
-          python -c "import torch; import wandb; print(f'PyTorch version: {torch.__version__}'); print(f'W&B version: {wandb.__version__}')"
+              echo "--- 4. Verifying environment ---"
+              python -c "import torch; import wandb; print(f'PyTorch version: {torch.__version__}'); print(f'W&B version: {wandb.__version__}')"
+              
+              echo "--- 5. Running the training script ---"
+              #python train.py \
+              #  --data_dir BraTS_126_samples  \
+              #  --output_dir /data/checkpoints \
+              #  --epochs 10 \
+              #  --batch_size 8 \
+              #  --num_patients 20
+              wandb agent timgsereda/middleslice-prediction/ba5liqle
           
-          echo "--- 5. Running the training script ---"
-          #python train.py \
-          #  --data_dir BraTS_126_samples  \
-          #  --output_dir /data/checkpoints \
-          #  --epochs 10 \
-          #  --batch_size 8 \
-          #  --num_patients 20
-          wandb agent timgsereda/middleslice-prediction/ba5liqle
+          volumeMounts:
+            - name: workspace
+              mountPath: /app
+            - name: data
+              mountPath: /data
+            - name: shm
+              mountPath: /dev/shm
+          resources:
+            requests:
+              memory: "50Gi"
+              cpu: "30"
+              nvidia.com/a100: "1"
+            limits:
+              memory: "60Gi"
+              cpu: "36"
+              nvidia.com/a100: "1"
       
-      volumeMounts:
+      volumes:
         - name: workspace
-          mountPath: /app
+          emptyDir:
+            sizeLimit: 50Gi
         - name: data
-          mountPath: /data
+          persistentVolumeClaim:
+            claimName: brats2025-4
         - name: shm
-          mountPath: /dev/shm
-      resources:
-        requests:
-          memory: 24Gi
-          cpu: "12"
-          nvidia.com/gpu: "1"
-        limits:
-          memory: 32Gi
-          cpu: "16"
-          nvidia.com/gpu: "1"
-  
-  volumes:
-    - name: workspace
-      emptyDir:
-        sizeLimit: 50Gi
-    - name: data
-      persistentVolumeClaim:
-        claimName: brats2025-5
-    - name: shm
-      emptyDir:
-        medium: Memory
-        sizeLimit: 16Gi
-  
-  restartPolicy: Never
+          emptyDir:
+            medium: Memory
+            sizeLimit: 16Gi
+      
+      restartPolicy: Never

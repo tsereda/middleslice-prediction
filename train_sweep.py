@@ -14,6 +14,9 @@ from monai.networks.nets import SwinUNETR, UNETR, BasicUNet
 from torch.nn import L1Loss 
 from transforms import get_train_transforms
 from logging_utils import create_reconstruction_log_panel
+from torchmetrics.image import StructuralSimilarityIndexMeasure
+from skimage.metrics import structural_similarity as ssim_3d
+from skimage.metrics import peak_signal_noise_ratio as psnr_3d
 
 
 class BraTS2D5Dataset(Dataset):
@@ -141,6 +144,98 @@ class BraTS2D5Dataset(Dataset):
         return input_tensor, target_tensor, slice_idx
 
 
+def compute_psnr(pred, target, data_range=1.0):
+    """
+    Compute PSNR between prediction and target.
+    Args:
+        pred: Predicted tensor
+        target: Ground truth tensor
+        data_range: Maximum possible pixel value
+    """
+    mse = torch.mean((pred - target) ** 2)
+    if mse == 0:
+        return float('inf')
+    return 20 * torch.log10(data_range / torch.sqrt(mse))
+
+
+def evaluate_3d_volume(model, dataset, volume_idx, device):
+    """
+    Reconstruct a full 3D volume and compute 3D metrics.
+    
+    Args:
+        model: Trained model
+        dataset: BraTS2D5Dataset instance
+        volume_idx: Index of volume to reconstruct
+        device: Device for computation
+    
+    Returns:
+        dict with metrics: mae_3d, psnr_3d, ssim_3d
+    """
+    model.eval()
+    patient_data = dataset.processed_volumes[volume_idx]
+    num_slices = patient_data["label"].shape[3]
+    
+    # Get volume dimensions
+    c, h, w, d = patient_data['t1'].shape
+    
+    # Initialize arrays for predicted and ground truth volumes (4 modalities)
+    pred_volume = np.zeros((4, h, w, num_slices), dtype=np.float32)
+    gt_volume = np.zeros((4, h, w, num_slices), dtype=np.float32)
+    
+    # Concatenate all modalities
+    img_modalities = torch.cat([
+        patient_data['t1'], 
+        patient_data['t1ce'], 
+        patient_data['t2'], 
+        patient_data['flair']
+    ], dim=0)
+    
+    with torch.no_grad():
+        for slice_idx in range(1, num_slices - 1):
+            # Prepare input
+            prev_slice = img_modalities[:, :, :, slice_idx - 1]
+            next_slice = img_modalities[:, :, :, slice_idx + 1]
+            input_tensor = torch.cat([prev_slice, next_slice], dim=0).unsqueeze(0).to(device)
+            
+            # Get prediction
+            output = model(input_tensor)
+            
+            # Store prediction and ground truth
+            pred_volume[:, :, :, slice_idx] = output.squeeze(0).cpu().numpy()
+            gt_volume[:, :, :, slice_idx] = img_modalities[:, :, :, slice_idx].cpu().numpy()
+    
+    # Handle boundary slices (copy from neighbors or set to ground truth)
+    pred_volume[:, :, :, 0] = gt_volume[:, :, :, 0]
+    pred_volume[:, :, :, -1] = gt_volume[:, :, :, -1]
+    
+    # Compute 3D metrics
+    mae_3d = np.mean(np.abs(pred_volume - gt_volume))
+    
+    # Compute PSNR and SSIM per modality, then average
+    psnr_per_modality = []
+    ssim_per_modality = []
+    
+    for mod_idx in range(4):
+        pred_mod = pred_volume[mod_idx]
+        gt_mod = gt_volume[mod_idx]
+        
+        # PSNR
+        data_range = gt_mod.max() - gt_mod.min()
+        if data_range > 0:
+            psnr_val = psnr_3d(gt_mod, pred_mod, data_range=data_range)
+            psnr_per_modality.append(psnr_val)
+        
+        # SSIM (3D)
+        ssim_val = ssim_3d(gt_mod, pred_mod, data_range=data_range)
+        ssim_per_modality.append(ssim_val)
+    
+    return {
+        'mae_3d': mae_3d,
+        'psnr_3d': np.mean(psnr_per_modality) if psnr_per_modality else 0.0,
+        'ssim_3d': np.mean(ssim_per_modality)
+    }
+
+
 def create_model(model_type, feature_size=24, device='cuda'):
     """
     Create model based on type string.
@@ -217,6 +312,9 @@ def main(args):
     print(f"Model type: {config.model_type}")
     os.makedirs(args.output_dir, exist_ok=True)
 
+    # Initialize 2D metrics
+    ssim_metric = StructuralSimilarityIndexMeasure(data_range=1.0).to(device)
+
     # Create dataset
     try:
         dataset = BraTS2D5Dataset(
@@ -243,6 +341,8 @@ def main(args):
     for epoch in range(args.epochs):
         model.train()
         epoch_loss = 0
+        epoch_ssim = 0
+        epoch_psnr = 0
         num_batches = len(data_loader)
         
         for i, (inputs, targets, slice_indices) in enumerate(data_loader):
@@ -253,10 +353,19 @@ def main(args):
             loss = loss_function(outputs, targets)
             loss.backward()
             optimizer.step()
+            
+            # Compute 2D metrics
+            with torch.no_grad():
+                batch_ssim = ssim_metric(outputs, targets)
+                batch_psnr = compute_psnr(outputs, targets, data_range=1.0)
+            
             epoch_loss += loss.item()
+            epoch_ssim += batch_ssim.item()
+            epoch_psnr += batch_psnr.item()
             
             if (i + 1) % 100 == 0:
-                print(f"   Epoch {epoch + 1}/{args.epochs}, Batch {i + 1}/{num_batches} | L1 Loss: {loss.item():.4f}")
+                print(f"   Epoch {epoch + 1}/{args.epochs}, Batch {i + 1}/{num_batches} | "
+                      f"L1: {loss.item():.4f}, SSIM: {batch_ssim.item():.4f}, PSNR: {batch_psnr.item():.2f} dB")
                 
                 # Log reconstruction samples
                 panel_bgr = create_reconstruction_log_panel(
@@ -271,12 +380,54 @@ def main(args):
                 
                 wandb.log({
                     "batch_l1_loss": loss.item(),
+                    "batch_ssim": batch_ssim.item(),
+                    "batch_psnr": batch_psnr.item(),
                     "reconstruction_samples": wandb.Image(panel_rgb)
                 })
         
+        # Compute epoch averages
         avg_loss = epoch_loss / num_batches
-        print(f"--- Epoch {epoch + 1}/{args.epochs}, Average L1 Loss: {avg_loss:.4f} ---")
-        wandb.log({"epoch": epoch + 1, "avg_epoch_l1_loss": avg_loss})
+        avg_ssim = epoch_ssim / num_batches
+        avg_psnr = epoch_psnr / num_batches
+        
+        print(f"--- Epoch {epoch + 1}/{args.epochs} ---")
+        print(f"Average L1 Loss: {avg_loss:.4f}, SSIM: {avg_ssim:.4f}, PSNR: {avg_psnr:.2f} dB")
+        
+        # 3D volume evaluation (every 5 epochs or last epoch)
+        if (epoch + 1) % 5 == 0 or (epoch + 1) == args.epochs:
+            print("Running 3D volume evaluation...")
+            num_eval_volumes = min(3, len(dataset.processed_volumes))  # Evaluate 3 volumes
+            
+            vol_metrics_list = []
+            for vol_idx in range(num_eval_volumes):
+                vol_metrics = evaluate_3d_volume(model, dataset, vol_idx, device)
+                vol_metrics_list.append(vol_metrics)
+                print(f"  Volume {vol_idx}: MAE={vol_metrics['mae_3d']:.4f}, "
+                      f"PSNR={vol_metrics['psnr_3d']:.2f} dB, SSIM={vol_metrics['ssim_3d']:.4f}")
+            
+            # Average 3D metrics
+            avg_3d_metrics = {
+                'mae_3d': np.mean([m['mae_3d'] for m in vol_metrics_list]),
+                'psnr_3d': np.mean([m['psnr_3d'] for m in vol_metrics_list]),
+                'ssim_3d': np.mean([m['ssim_3d'] for m in vol_metrics_list])
+            }
+            
+            wandb.log({
+                "epoch": epoch + 1,
+                "avg_epoch_l1_loss": avg_loss,
+                "avg_epoch_ssim": avg_ssim,
+                "avg_epoch_psnr": avg_psnr,
+                "avg_3d_mae": avg_3d_metrics['mae_3d'],
+                "avg_3d_psnr": avg_3d_metrics['psnr_3d'],
+                "avg_3d_ssim": avg_3d_metrics['ssim_3d']
+            })
+        else:
+            wandb.log({
+                "epoch": epoch + 1,
+                "avg_epoch_l1_loss": avg_loss,
+                "avg_epoch_ssim": avg_ssim,
+                "avg_epoch_psnr": avg_psnr
+            })
         
         # Save checkpoint with model type in filename
         checkpoint_path = os.path.join(args.output_dir, f"{config.model_type}_epoch_{epoch+1}.pth")
